@@ -20,6 +20,9 @@ import {
   UserRound,
 } from "lucide-react";
 
+import { CurrencySwitcher, type CurrencyOption } from "@/components/currency-switcher";
+import { dashboardMoney } from "@/lib/dashboard-currency";
+
 type KpiValue = { usd: string; count: number };
 type ManagementData = {
   kpis: {
@@ -66,6 +69,7 @@ type RequestData = {
     vendorName: string | null;
     invoiceNumber: string | null;
     invoiceAmount: string | null;
+    invoiceAmountUsd: string | null;
     currency: { code: string } | null;
     project: { name: string } | null;
     status: string;
@@ -117,20 +121,6 @@ function statusLabel(status: string) {
   return STATUS_LABELS[status] ?? status.replaceAll("_", " ").toLowerCase();
 }
 
-function money(value: string | number, currency = "USD") {
-  const amount = Number(value);
-  if (!Number.isFinite(amount)) return "—";
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `${currency} ${amount.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-  }
-}
-
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
   const result = await response.json();
@@ -148,10 +138,19 @@ function countStatuses(counts: Record<string, number>) {
 export function FinancialOverview({
   permissions,
   fullName,
+  currencies,
 }: {
   permissions: string[];
   fullName: string;
+  currencies: CurrencyOption[];
 }) {
+  const [displayCurrency, setDisplayCurrency] = useState("USD");
+  const currencyOptions = useMemo(() => [
+    { code: "USD", name: "US Dollar", symbol: "$", usdPerUnit: "1" },
+    ...currencies.filter((item) => item.code !== "USD" && Number(item.usdPerUnit) > 0),
+  ], [currencies]);
+  const selectedCurrency = currencyOptions.find((item) => item.code === displayCurrency) ?? currencyOptions[0];
+  const money = useCallback((value: string | number | null | undefined) => dashboardMoney(value, selectedCurrency), [selectedCurrency]);
   const [data, setData] = useState<OverviewData>({ recent: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -186,8 +185,8 @@ export function FinancialOverview({
         vendor: item.vendorName || "Vendor not set",
         invoice: item.invoiceNumber || "—",
         project: item.project?.name ?? "—",
-        amount: item.invoiceAmount ?? "",
-        currency: item.currency?.code ?? "",
+        amount: item.invoiceAmountUsd ?? (item.currency?.code === "USD" ? item.invoiceAmount : null) ?? "",
+        currency: "USD",
         status: item.status,
         date: item.createdAt,
       })) ?? approvals?.items.slice(0, 5).map((item) => ({
@@ -241,7 +240,7 @@ export function FinancialOverview({
       { label: "Waiting for payment", value: String(data.ap.metrics.approvedWaiting), note: "Approved invoices", icon: Banknote, tone: "violet", href: "/workspace/payables/payments" },
       { label: "Due this week", value: String(data.ap.metrics.dueThisWeek), note: "Scheduled or due soon", icon: CalendarDays, tone: "cyan", href: "/workspace/payables/calendar?view=week" },
       { label: "Overdue invoices", value: String(data.ap.metrics.overdue), note: "Require attention", icon: CircleAlert, tone: "red", href: "/workspace/payables/calendar?view=overdue" },
-      { label: "Total paid", value: money(data.ap.metrics.totalPaidUsd), note: "Confirmed payments · USD", icon: BadgeCheck, tone: "green", href: "/workspace/payables/calendar?view=completed" },
+      { label: "Total paid", value: money(data.ap.metrics.totalPaidUsd), note: "Confirmed payments \u00b7 " + selectedCurrency.code, icon: BadgeCheck, tone: "green", href: "/workspace/payables/calendar?view=completed" },
     ];
     if (data.approvals) return [
       { label: "Awaiting your approval", value: String(data.approvals.stats.pending), note: "Assigned requests awaiting action", icon: Clock3, tone: "amber", href: "/workspace/approvals" },
@@ -258,7 +257,7 @@ export function FinancialOverview({
       { label: "Approved", value: String(counts.APPROVED ?? 0), note: "Waiting for payment", icon: BadgeCheck, tone: "cyan", href: "/payment-requests" },
       { label: "Paid", value: String(counts.PAID ?? 0), note: "Payment completed", icon: Banknote, tone: "green", href: "/payment-requests" },
     ];
-  }, [canAccessAp, canApprove, data]);
+  }, [canAccessAp, canApprove, data, money, selectedCurrency.code]);
 
   const trend = data.management?.trends ?? [];
   const trendMax = Math.max(1, ...trend.flatMap((item) => [item.requests, item.approvedCount, item.completedCount]));
@@ -307,8 +306,12 @@ export function FinancialOverview({
     <div className="financial-overview">
       <header className="overview-greeting">
         <div><h1>Good to see you, {displayName}</h1><p>Here’s your financial workspace at a glance.</p></div>
-        {permissions.includes("payments:create") && <Link href="/payment-requests/new" className="overview-create-link"><ClipboardList size={16} /> New request</Link>}
+        <div className="overview-greeting-actions">
+          <CurrencySwitcher currencies={currencyOptions} value={selectedCurrency.code} onChange={setDisplayCurrency} />
+          {permissions.includes("payments:create") && <Link href="/payment-requests/new" className="overview-create-link"><ClipboardList size={16} /> New request</Link>}
+        </div>
       </header>
+      <p className="overview-currency-note">Amounts displayed in {selectedCurrency.code} using configured exchange rates. {!currencyOptions.some((item) => item.code === "GBP") && "GBP requires an active currency and exchange rate in payment settings."}</p>
       <section className="overview-lifecycle-banner" aria-label="PAYTRIVA payment lifecycle">
         <Image
           alt="Payment lifecycle: submit a request, AP reviews the invoice, an approver authorizes or rejects it, and approved payments are processed weekly."
@@ -390,7 +393,7 @@ export function FinancialOverview({
 
         <article className="overview-panel overview-action-panel">
           <div className="overview-panel-heading">
-            <div><span className="overview-panel-icon"><CalendarDays size={17} /></span><div><h2>This week’s payment run</h2><p>Scheduled payments · USD</p></div></div>
+            <div><span className="overview-panel-icon"><CalendarDays size={17} /></span><div><h2>This week’s payment run</h2><p>Scheduled payments {selectedCurrency.code}</p></div></div>
           </div>
           <div className="overview-run-summary">
             <span className="overview-run-date"><CalendarDays size={15} />{paymentCycle ? new Date(`${paymentCycle.date}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : data.calendar ? new Date(`${data.calendar.nextWednesday}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "—"}</span>
@@ -431,14 +434,14 @@ export function FinancialOverview({
           </div>
           <div className="overview-table-wrap">
             <table className="overview-table">
-              <thead><tr><th>Transaction</th><th>Vendor / invoice</th><th>Project</th><th>Amount</th><th>Status</th></tr></thead>
+              <thead><tr><th>Transaction</th><th>Vendor / invoice</th><th>Project</th><th>Amount ({selectedCurrency.code})</th><th>Status</th></tr></thead>
               <tbody>
                 {data.recent.map((item) => (
                   <tr key={item.id}>
                     <td><Link href={item.href}>{item.transactionId}</Link></td>
                     <td><strong>{item.vendor}</strong><small>Invoice {item.invoice}</small></td>
                     <td>{item.project}</td>
-                    <td>{item.amount ? item.currency ? money(item.amount, item.currency) : item.amount : "—"}</td>
+                    <td>{item.amount ? money(item.amount) : "—"}</td>
                     <td><span className={`overview-status-pill status-pill-${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span></td>
                   </tr>
                 ))}
@@ -450,7 +453,7 @@ export function FinancialOverview({
 
         <article className="overview-panel overview-project-panel">
           <div className="overview-panel-heading">
-            <div><span className="overview-panel-icon"><Layers3 size={17} /></span><div><h2>Project activity</h2><p>{canManageReports ? "Requested amount · USD" : "Your account security"}</p></div></div>
+            <div><span className="overview-panel-icon"><Layers3 size={17} /></span><div><h2>Project activity</h2><p>{canManageReports ? "Requested amount " + selectedCurrency.code : "Your account security"}</p></div></div>
             {canManageReports && <Link href="/workspace/management">View report <ArrowRight size={14} /></Link>}
           </div>
           {data.management?.projects.length ? (

@@ -35,3 +35,19 @@
 - Added README setup instructions and optional environment examples.
 - Verification: ESLint and TypeScript checks passed. All 13 isolated PostgreSQL provisioning checks passed, including password validation/preservation, activation, exact role grants, no extra administrator grants, retries, concurrent duplicate prevention and rollback on conflicts. The disposable test database was removed.
 - Railway CLI authentication is now available after the user's sign-in. Confirmed the linked production service is JSAN_PAYTRIVA at jsanpaytriva-production.up.railway.app and INITIAL_ADMIN_EMAIL is admin@paytriva.local. Verified noninteractive Railway SSH can invoke npm successfully. Publishing this setup for execution and login verification on that service.
+
+
+### 2026-11-16 - Verify hosted role logins
+
+- Railway successfully deployed commit 54940e5 to the confirmed JSAN_PAYTRIVA production service.
+- Executed npm run db:seed:roles through authenticated noninteractive Railway SSH. Created the Requestor, Accounts Payable and Approver accounts; verified the administrator setup using the existing configured credentials.
+- Verified admin@paytriva.local, requestor@paytriva.local, ap@paytriva.local and approver@paytriva.local against the actual HTTPS login and session endpoints. All eight responses returned 200. Only the administrator session had platform:admin; each employee session carried the expected standard role.
+- Signed out every verification session. Passwords and session tokens are omitted from this log. The production account creation is recorded by ROLE_LOGIN_CREATED audit events.
+
+
+### 2026-11-16 - Dashboard currency selector
+
+- Added display currency selection to the main dashboard for all roles. Converts KPI amounts, scheduled payments, recent invoices and project amounts together, using configured effective rates and stored USD snapshots. Updated all monetary labels. Missing GBP configuration is explained without inventing an exchange rate.
+- Added exact decimal conversion with regression tests. Stored payment values are unchanged.
+- Verification: ESLint passed without warnings; all 43 unit tests passed; production build including TypeScript and all route generation passed. Changes are local and have not been pushed or deployed.
+- User authorized publishing these verified dashboard changes to origin/main in JSAN_PAYTRIVA.

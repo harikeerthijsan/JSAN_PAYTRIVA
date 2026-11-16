@@ -11,7 +11,7 @@ export type CurrencyRate = { code: string; name: string; symbol: string; usdPerU
 export async function loadCurrencyRates(): Promise<CurrencyRate[]> {
   const [currencyRows, rateRows] = await Promise.all([
     db.paymentCurrency.findMany({ where: { isActive: true }, select: { code: true, name: true, symbol: true }, orderBy: { code: "asc" } }),
-    db.currencyExchangeRate.findMany({ orderBy: { effectiveAt: "desc" }, select: { currencyCode: true, usdPerUnit: true } }),
+    db.currencyExchangeRate.findMany({ where: { effectiveAt: { lte: new Date() } }, orderBy: { effectiveAt: "desc" }, select: { currencyCode: true, usdPerUnit: true } }),
   ]);
   const latestRate = new Map<string, string>();
   for (const rate of rateRows) if (!latestRate.has(rate.currencyCode)) latestRate.set(rate.currencyCode, rate.usdPerUnit.toString());
