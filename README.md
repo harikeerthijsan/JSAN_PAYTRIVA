@@ -28,6 +28,18 @@ Private invoice uploads are stored under `.private-uploads` by default, outside 
 
 The seed creates the Requestor, Accounts Payable, and Approver roles and their baseline permissions. Requestors receive own-request permissions; Accounts Payable can read submitted requests; Approvers retain access only to requests assigned to them. It creates the initial administrator as an Accounts Payable user with separate `platform:admin` and `payments:manage_masters` permissions. The seed also creates the USD base currency. The approval migration installs four USD bands, initially without assigned users; an administrator must assign active Approver-role users in **Approval matrix**. It does not add example vendors, entities, projects, cost centers, exchange rates, or payment requests. Bootstrap credentials are read from the environment, never printed, and an existing account's password is not reset when seeding again.
 
+### Logins for each role
+
+Run the explicit account setup with the same production environment as the app:
+
+    npm run db:seed:roles
+
+This runs the normal administrator/role setup and creates activated Requestor, Accounts Payable and Approver accounts. Their default emails are requestor@DOMAIN, ap@DOMAIN and approver@DOMAIN, where DOMAIN comes from INITIAL_ADMIN_EMAIL. For example, admin@paytriva.local creates requestor@paytriva.local, ap@paytriva.local and approver@paytriva.local.
+
+New role accounts use ROLE_LOGIN_PASSWORD when configured, otherwise INITIAL_ADMIN_PASSWORD. The setup validates the existing password policy and optional ALLOWED_EMAIL_DOMAIN. Set ROLE_REQUESTOR_EMAIL, ROLE_ACCOUNTS_PAYABLE_EMAIL and ROLE_APPROVER_EMAIL to use specific addresses. Each account receives its one standard role. The bootstrap administrator retains its separate administrator permissions.
+
+The command prints account emails and readiness without printing passwords. Existing passwords and activation states are preserved. An existing account with conflicting roles/status causes the additional-account transaction to fail. Repeating setup adds no duplicate accounts or role assignments. Account creation is audited. This command creates login accounts only.
+
 ### Employee creation and email
 
 Administrators create employees directly in **User management → Create employee**: they set the name, work email, role, and an initial password (which must meet the password policy), and the account is active immediately and can sign in. Platform administrators may also grant additional permissions at creation or later via **Manage access**. Every creation and permission change is recorded in the audit log.

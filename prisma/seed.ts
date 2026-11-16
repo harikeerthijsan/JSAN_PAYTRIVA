@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { z } from "zod";
-import { passwordMeetsPolicy } from "../src/lib/validation";
+import { createEmployeeSchema, passwordMeetsPolicy } from "../src/lib/validation";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL must be configured before seeding.");
@@ -49,6 +49,71 @@ const rolePermissions: Record<string, string[]> = {
   ],
   APPROVER: ["profile:read", "profile:write", "approvals:access"],
 };
+
+async function seedRoleLogins(adminId: string, adminEmail: string, initialPassword: string) {
+  const domain = adminEmail.split("@")[1];
+  const password = process.env.ROLE_LOGIN_PASSWORD || initialPassword;
+  const definitions = [
+    { roleKey: "REQUESTOR", fullName: "PAYTRIVA Requestor", email: process.env.ROLE_REQUESTOR_EMAIL || "requestor@" + domain },
+    { roleKey: "ACCOUNTS_PAYABLE", fullName: "PAYTRIVA Accounts Payable", email: process.env.ROLE_ACCOUNTS_PAYABLE_EMAIL || "ap@" + domain },
+    { roleKey: "APPROVER", fullName: "PAYTRIVA Approver", email: process.env.ROLE_APPROVER_EMAIL || "approver@" + domain },
+  ];
+  const inputs = definitions.map((definition) => createEmployeeSchema.parse({ ...definition, password }));
+  const emails = inputs.map((input) => input.email);
+  if (new Set(emails).size !== emails.length || emails.includes(adminEmail)) {
+    throw new Error("Role login emails must be distinct from each other and the administrator. Set ROLE_REQUESTOR_EMAIL, ROLE_ACCOUNTS_PAYABLE_EMAIL or ROLE_APPROVER_EMAIL to resolve a collision.");
+  }
+  const passwordHash = await bcrypt.hash(password, 12);
+  const result = await db.$transaction(async (transaction) => {
+    await transaction.$executeRawUnsafe("SELECT pg_advisory_xact_lock(16112026)");
+    const accounts: { role: string; email: string; status: string }[] = [];
+    for (const input of inputs) {
+      const role = await transaction.role.findUniqueOrThrow({ where: { key: input.roleKey } });
+      const existing = await transaction.user.findUnique({
+        where: { email: input.email },
+        include: { roles: { include: { role: true } } },
+      });
+      if (existing) {
+        if (!existing.isActive || !existing.activatedAt || !existing.passwordHash ||
+            existing.roles.length !== 1 || existing.roles[0].role.key !== input.roleKey) {
+          throw new Error("The existing account " + input.email + " cannot be used for the requested role login. Manage that account explicitly or choose another role email.");
+        }
+        const matches = await bcrypt.compare(password, existing.passwordHash);
+        accounts.push({
+          role: role.name,
+          email: existing.email,
+          status: matches ? "Ready (setup password matches)" : "Existing account retained; use its current password",
+        });
+        continue;
+      }
+      const user = await transaction.user.create({
+        data: {
+          email: input.email,
+          fullName: input.fullName,
+          passwordHash,
+          isActive: true,
+          activatedAt: new Date(),
+          roles: { create: { roleId: role.id, assignedById: adminId } },
+        },
+      });
+      await transaction.auditLog.create({
+        data: {
+          actorId: adminId,
+          actorName: "PAYTRIVA role-login setup",
+          action: "ROLE_LOGIN_CREATED",
+          entityType: "USER",
+          entityId: user.id,
+          summary: "Created an activated " + role.name + " login.",
+          newValue: { email: user.email, roleKey: role.key },
+        },
+      });
+      accounts.push({ role: role.name, email: user.email, status: "Created; use the configured setup password" });
+    }
+    return accounts;
+  }, { timeout: 30000 });
+  console.table(result);
+  console.info("New role logins use ROLE_LOGIN_PASSWORD when set, otherwise INITIAL_ADMIN_PASSWORD. Existing account passwords are retained.");
+}
 
 async function seed() {
   const rawEmail = process.env.INITIAL_ADMIN_EMAIL;
@@ -150,6 +215,10 @@ async function seed() {
     create: { code: "USD", name: "US Dollar", symbol: "$", decimalPlaces: 2 },
     update: { name: "US Dollar", symbol: "$", decimalPlaces: 2, isActive: true },
   });
+  console.info("Administrator login: " + admin.email + " (existing password retained on repeated setup).");
+  if (process.argv.includes("--role-logins")) {
+    await seedRoleLogins(admin.id, parsedEmail.data, rawPassword);
+  }
 }
 
 seed()

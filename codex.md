@@ -17,3 +17,21 @@
 - Verified .env, private uploaded invoices/proofs, node_modules, generated Prisma client and Next.js output are excluded by the project's ignore rules.
 - Verification before publication: ESLint passed, all 40 existing unit tests passed, and the Next.js 16.4.6 optimized production build and TypeScript checks passed. Integration tests and live Railway deployment were not performed in this publication task.
 - Publishing through a normal commit on main and a non-force push. Deployment configuration and database setup follow docs/DEPLOYMENT.md for this actual application.
+
+
+### 2026-11-16 - Pull latest Paytriva changes
+
+- User requested pulling the GitHub changes into C:/Users/Hari Keerthi/Desktop/Projects/Paytriva.
+- Verified a clean working tree on main and the origin remote harikeerthijsan/JSAN_PAYTRIVA.
+- Fast-forwarded from fa73f42 to d94e1c0, including fc95b57 (generate Prisma before Next.js build) and d94e1c0 (deploy Prisma migrations before Next.js start).
+- Verified the updated branch after pulling. No application start, database migration, dependency installation or push was run as part of this pull. This local log entry records the operation.
+
+
+### 2026-11-16 - Provision login accounts for every Paytriva role
+
+- User requested logins for all roles on the hosted Paytriva application.
+- Added opt-in db:seed:roles / --role-logins to the existing seed. It creates activated Requestor, Accounts Payable and Approver users using addresses derived from the administrator domain or explicit per-role environment overrides. New account passwords come from ROLE_LOGIN_PASSWORD or INITIAL_ADMIN_PASSWORD. Existing passwords/statuses are preserved and conflicting existing role accounts cause the extra-account transaction to roll back.
+- Reused employee/password/domain validation and the standard role catalog. Additional users receive their one standard role. Creation and its audit entry are atomic, with an advisory lock to prevent duplicates on concurrent retries. The setup prints account emails/readiness without password values.
+- Added README setup instructions and optional environment examples.
+- Verification: ESLint and TypeScript checks passed. All 13 isolated PostgreSQL provisioning checks passed, including password validation/preservation, activation, exact role grants, no extra administrator grants, retries, concurrent duplicate prevention and rollback on conflicts. The disposable test database was removed.
+- Railway CLI authentication is now available after the user's sign-in. Confirmed the linked production service is JSAN_PAYTRIVA at jsanpaytriva-production.up.railway.app and INITIAL_ADMIN_EMAIL is admin@paytriva.local. Verified noninteractive Railway SSH can invoke npm successfully. Publishing this setup for execution and login verification on that service.
