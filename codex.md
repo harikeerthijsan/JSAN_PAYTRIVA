@@ -67,3 +67,9 @@
 - Removed the Currencies management tab and currency create/activation endpoints. Form options now come from a fixed EUR, GBP, USD list rather than editable master currencies; invoice/rule/rate validation enforces this list.
 - Added an idempotent migration to ensure the three currency foreign-key rows exist and are active. Existing currencies, invoices and historical exchange rates are preserved. Invoice-date exchange-rate configuration remains separate from online dashboard display rates.
 - Verification: local migration applied successfully; all 50 unit tests, ESLint and production build passed. Authenticated HTTP checks confirmed exactly EUR/GBP/USD options, removed Currencies tab, and HTTP 400 for currency creation/deactivation. Test session signed out. Publishing to JSAN_PAYTRIVA main under existing push authorization.
+
+
+### 2026-11-16 - Remove payment dropdown setup banner
+
+- Removed the generic administrator dropdown setup warning from create/edit payment request forms as requested. Field validation and dropdown options remain unchanged.
+- Verification: targeted ESLint and git diff whitespace checks passed. Publishing to JSAN_PAYTRIVA main under existing push authorization.

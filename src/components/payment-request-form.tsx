@@ -204,9 +204,6 @@ export function PaymentRequestForm({ requestId }: { requestId?: string }) {
       <Link href="/payment-requests" className="payment-back"><ArrowLeft size={15} /> Payment requests</Link>
       <div className="page-heading payment-heading"><div><span className="eyebrow">{requestId ? "REQUEST UPDATE" : "NEW REQUEST"}</span><h1>{requestId ? "Edit payment request" : "Create payment request"}</h1><p>{requestId ? "Update the requested information and resubmit to AP for review." : "Enter invoice and project details. Drafts remain private until submitted."}</p></div></div>
       {message && <div className="payment-alert" role="alert">{message}</div>}
-      {!masters.entities.length || !masters.currencies.length || !masters.costCenters.length || !masters.projects.length
-        ? <div className="payment-info">Payment dropdowns need to be configured by an authorized administrator before requests can be submitted.</div>
-        : null}
       <form className="payment-form" onSubmit={(event) => void save(event, "submit")}>
         <section className="panel payment-form-section">
           <div className="payment-section-title"><span>01</span><div><h2>Vendor &amp; invoice information</h2><p>Provide the details as shown on the invoice.</p></div></div>
