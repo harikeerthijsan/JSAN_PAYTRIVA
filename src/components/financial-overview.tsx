@@ -20,7 +20,8 @@ import {
   UserRound,
 } from "lucide-react";
 
-import { CurrencySwitcher, type CurrencyOption } from "@/components/currency-switcher";
+import { CurrencySwitcher } from "@/components/currency-switcher";
+import type { LiveDashboardRates } from "@/lib/live-dashboard-rates";
 import { dashboardMoney } from "@/lib/dashboard-currency";
 
 type KpiValue = { usd: string; count: number };
@@ -138,17 +139,32 @@ function countStatuses(counts: Record<string, number>) {
 export function FinancialOverview({
   permissions,
   fullName,
-  currencies,
+  exchangeRates,
 }: {
   permissions: string[];
   fullName: string;
-  currencies: CurrencyOption[];
+  exchangeRates: LiveDashboardRates;
 }) {
   const [displayCurrency, setDisplayCurrency] = useState("USD");
-  const currencyOptions = useMemo(() => [
-    { code: "USD", name: "US Dollar", symbol: "$", usdPerUnit: "1" },
-    ...currencies.filter((item) => item.code !== "USD" && Number(item.usdPerUnit) > 0),
-  ], [currencies]);
+  const [liveRates, setLiveRates] = useState(exchangeRates);
+  const [rateError, setRateError] = useState(false);
+  const currencyOptions = liveRates.currencies;
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const latest = await getJson<LiveDashboardRates>("/api/dashboard/exchange-rates");
+        if (active) { setLiveRates(latest); setRateError(false); }
+      } catch {
+        // Keep the last dated rates visible and clearly mark the failed refresh.
+        if (active) setRateError(true);
+      }
+    };
+    const timer = window.setInterval(() => { void refresh(); }, 3600000);
+    const onFocus = () => { void refresh(); };
+    window.addEventListener("focus", onFocus);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", onFocus); };
+  }, []);
   const selectedCurrency = currencyOptions.find((item) => item.code === displayCurrency) ?? currencyOptions[0];
   const money = useCallback((value: string | number | null | undefined) => dashboardMoney(value, selectedCurrency), [selectedCurrency]);
   const [data, setData] = useState<OverviewData>({ recent: [] });
@@ -311,7 +327,14 @@ export function FinancialOverview({
           {permissions.includes("payments:create") && <Link href="/payment-requests/new" className="overview-create-link"><ClipboardList size={16} /> New request</Link>}
         </div>
       </header>
-      <p className="overview-currency-note">Amounts displayed in {selectedCurrency.code} using configured exchange rates. {!currencyOptions.some((item) => item.code === "GBP") && "GBP requires an active currency and exchange rate in payment settings."}</p>
+      <p className="overview-currency-note" aria-live="polite">
+        Amounts displayed in {selectedCurrency.code}. Daily reference rates from <a href="https://frankfurter.dev/" target="_blank" rel="noreferrer">Frankfurter</a>; checked hourly.
+        {selectedCurrency.rateDate && " Rate date: " + selectedCurrency.rateDate + "."}
+        {selectedCurrency.code === "USD" && currencyOptions.filter((item) => item.rateDate).map((item) => " " + item.code + ": " + item.rateDate + ".")}
+        {liveRates.unavailable.length > 0 && " " + liveRates.unavailable.join(" / ") + " rates temporarily unavailable. USD remains available."}
+        {rateError && " Unable to refresh rates; showing the last retrieved rates with their publication date. Reload to retry."}
+        {displayCurrency !== selectedCurrency.code && " Selected currency is unavailable; amounts are now shown in USD."}
+      </p>
       <section className="overview-lifecycle-banner" aria-label="PAYTRIVA payment lifecycle">
         <Image
           alt="Payment lifecycle: submit a request, AP reviews the invoice, an approver authorizes or rejects it, and approved payments are processed weekly."

@@ -51,3 +51,12 @@
 - Added exact decimal conversion with regression tests. Stored payment values are unchanged.
 - Verification: ESLint passed without warnings; all 43 unit tests passed; production build including TypeScript and all route generation passed. Changes are local and have not been pushed or deployed.
 - User authorized publishing these verified dashboard changes to origin/main in JSAN_PAYTRIVA.
+
+
+### 2026-11-16 - Daily online dashboard exchange rates
+
+- Replaced dashboard master-data rates with Frankfurter public GBP/USD and EUR/USD daily reference rates. USD is the base; no master-data fallback or API key is used.
+- Server checks rates hourly with bounded fetch timeouts; open dashboards refresh hourly and on focus through an authenticated endpoint. Provider and publication dates are visible. Invalid, future, or over-seven-day-old quotes are rejected; missing quotes leave USD available and show a clear message. Failed browser refreshes retain dated rates with a warning.
+- Existing stored USD payment snapshots remain the source amounts; dashboard display conversion alone uses current online rates.
+- Verification: all 48 unit tests, ESLint and production build passed. Actual online loader returned current dated GBP and EUR quotes. Local HTTP checks confirmed anonymous endpoint 401, signed-in endpoint 200 with USD/GBP/EUR, and dashboard 200 with both options and source label. Test session signed out.
+- Publishing this correction to JSAN_PAYTRIVA main under the user's existing push authorization.
