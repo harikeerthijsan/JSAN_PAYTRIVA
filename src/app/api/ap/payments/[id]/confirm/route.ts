@@ -8,6 +8,8 @@ import { MAX_DOCUMENT_BYTES, removePrivateDocument, savePrivateDocument } from "
 import { notificationEventKey, queueNotification } from "@/lib/notifications";
 import { auditContext, recordAudit } from "@/lib/audit";
 
+import { SUPPORTED_CURRENCIES } from "@/lib/supported-currencies";
+
 type RouteContext = { params: Promise<{ id: string }> };
 
 function isCalendarDate(value: string): boolean {
@@ -36,7 +38,7 @@ export async function POST(request: Request, context: RouteContext) {
   const amountPattern = /^\d{1,14}(?:\.\d{1,6})?$/;
   if (!amountPattern.test(amountPaidValue) || new Prisma.Decimal(amountPaidValue).lte(0)) return jsonError("Amount paid must be a positive number with up to 6 decimal places.", 400);
   const currencyCode = raw.currencyCode.trim().toUpperCase();
-  if (!/^[A-Z]{3}$/.test(currencyCode)) return jsonError("Select a valid payment currency.", 400);
+  if (!SUPPORTED_CURRENCIES.some((currency) => currency.code === currencyCode)) return jsonError("Select a valid payment currency.", 400);
   if (!isCalendarDate(raw.actualPaymentDate)) return jsonError("Actual payment date must be a valid calendar date.", 400);
   const actualPaymentDate = new Date(`${raw.actualPaymentDate}T00:00:00.000Z`);
   if (actualPaymentDate.getTime() > Date.now()) return jsonError("Actual payment date cannot be in the future.", 400);

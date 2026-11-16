@@ -60,3 +60,10 @@
 - Existing stored USD payment snapshots remain the source amounts; dashboard display conversion alone uses current online rates.
 - Verification: all 48 unit tests, ESLint and production build passed. Actual online loader returned current dated GBP and EUR quotes. Local HTTP checks confirmed anonymous endpoint 401, signed-in endpoint 200 with USD/GBP/EUR, and dashboard 200 with both options and source label. Test session signed out.
 - Publishing this correction to JSAN_PAYTRIVA main under the user's existing push authorization.
+
+
+### 2026-11-16 - Fixed form currencies
+
+- Removed the Currencies management tab and currency create/activation endpoints. Form options now come from a fixed EUR, GBP, USD list rather than editable master currencies; invoice/rule/rate validation enforces this list.
+- Added an idempotent migration to ensure the three currency foreign-key rows exist and are active. Existing currencies, invoices and historical exchange rates are preserved. Invoice-date exchange-rate configuration remains separate from online dashboard display rates.
+- Verification: local migration applied successfully; all 50 unit tests, ESLint and production build passed. Authenticated HTTP checks confirmed exactly EUR/GBP/USD options, removed Currencies tab, and HTTP 400 for currency creation/deactivation. Test session signed out. Publishing to JSAN_PAYTRIVA main under existing push authorization.

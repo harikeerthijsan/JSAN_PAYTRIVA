@@ -5,10 +5,12 @@ import { db } from "@/lib/db";
 import { jsonError, requireUser } from "@/lib/api";
 import { auditContext, recordAudit } from "@/lib/audit";
 
+import { SUPPORTED_CURRENCY_CODES } from "@/lib/supported-currencies";
+
 const schema = z.object({
   reason: z.string().trim().min(5).max(2000),
   amountPaid: z.string().regex(/^\d{1,14}(?:\.\d{1,6})?$/),
-  currencyCode: z.string().regex(/^[A-Za-z]{3}$/),
+  currencyCode: z.string().trim().toUpperCase().pipe(z.enum(SUPPORTED_CURRENCY_CODES)),
   actualPaymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   paymentReference: z.string().trim().min(2).max(120),
   paymentMethod: z.string().trim().min(2).max(80),

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SUPPORTED_CURRENCY_CODES } from "./supported-currencies";
 
 const optionalText = (max: number) =>
   z.string().trim().max(max).optional().transform((value) => value || undefined);
@@ -29,7 +30,7 @@ export const paymentDraftSchema = z.object({
   invoiceDate: optionalDate,
   serviceStartDate: optionalDate,
   serviceEndDate: optionalDate,
-  currencyCode: z.string().trim().toUpperCase().length(3).optional().or(z.literal("")),
+  currencyCode: z.string().trim().toUpperCase().pipe(z.enum(SUPPORTED_CURRENCY_CODES)).optional().or(z.literal("")),
   invoiceAmount: optionalAmount,
   taxAmount: optionalAmount,
   dueDate: optionalDate,

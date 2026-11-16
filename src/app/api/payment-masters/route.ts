@@ -4,10 +4,11 @@ import { db } from "@/lib/db";
 import { jsonError, requirePermission, requireUser } from "@/lib/api";
 import { auditContext, recordAudit } from "@/lib/audit";
 
-const masterType = z.enum(["entity", "currency", "costCenter", "project", "financialRule"]);
+import { SUPPORTED_CURRENCIES, SUPPORTED_CURRENCY_CODES } from "@/lib/supported-currencies";
+
+const masterType = z.enum(["entity", "costCenter", "project", "financialRule"]);
 const masterSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("entity"), name: z.string().trim().min(1).max(120), code: z.string().trim().max(20).optional() }),
-  z.object({ type: z.literal("currency"), code: z.string().trim().toUpperCase().length(3), name: z.string().trim().min(1).max(80), symbol: z.string().trim().min(1).max(8), decimalPlaces: z.number().int().min(0).max(6) }),
   z.object({ type: z.literal("costCenter"), name: z.string().trim().min(1).max(120), code: z.string().trim().min(1).max(40) }),
   z.object({ type: z.literal("project"), name: z.string().trim().min(1).max(160), code: z.string().trim().max(40).optional() }),
   z.object({
@@ -16,7 +17,7 @@ const masterSchema = z.discriminatedUnion("type", [
     ruleKind: z.enum(["WITHHOLDING_TAX", "OTHER_DEDUCTION"]),
     calculation: z.enum(["PERCENTAGE", "FIXED_AMOUNT"]),
     value: z.string().regex(/^(?:0|[1-9]\d{0,12})(?:\.\d{1,6})?$/),
-    currencyCode: z.string().trim().toUpperCase().length(3).optional().or(z.literal("")),
+    currencyCode: z.enum(SUPPORTED_CURRENCY_CODES).optional().or(z.literal("")),
   }).superRefine((rule, context) => {
     if (Number(rule.value) <= 0) context.addIssue({ code: "custom", path: ["value"], message: "Rule value must be greater than zero." });
     if (rule.calculation === "PERCENTAGE" && Number(rule.value) > 100) {
@@ -29,7 +30,7 @@ const masterSchema = z.discriminatedUnion("type", [
 ]);
 const rateSchema = z.object({
   type: z.literal("exchangeRate"),
-  currencyCode: z.string().trim().toUpperCase().length(3),
+  currencyCode: z.enum(SUPPORTED_CURRENCY_CODES),
   usdPerUnit: z.string().regex(/^(?:0|[1-9]\d{0,11})(?:\.\d{1,12})?$/),
   effectiveAt: z.string().datetime({ offset: true }),
   source: z.string().trim().min(1).max(120),
@@ -44,11 +45,11 @@ export async function GET() {
   const canManage = auth.user.permissions.includes("payments:manage_masters");
   const [entities, currencies, costCenters, projects, rates, financialRules] = await Promise.all([
     db.paymentEntity.findMany({ where: canManage ? {} : { isActive: true }, orderBy: { name: "asc" } }),
-    db.paymentCurrency.findMany({ where: canManage ? {} : { isActive: true }, orderBy: { name: "asc" } }),
+    Promise.resolve(SUPPORTED_CURRENCIES),
     db.costCenter.findMany({ where: canManage ? {} : { isActive: true }, orderBy: { name: "asc" } }),
     db.paymentProject.findMany({ where: canManage ? {} : { isActive: true }, orderBy: { name: "asc" } }),
     db.currencyExchangeRate.findMany({
-      where: { effectiveAt: { lte: new Date() } },
+      where: { currencyCode: { in: [...SUPPORTED_CURRENCY_CODES] }, effectiveAt: { lte: new Date() } },
       orderBy: [{ currencyCode: "asc" }, { effectiveAt: "desc" }],
       include: { currency: { select: { decimalPlaces: true, symbol: true } } },
     }),
@@ -120,24 +121,6 @@ export async function POST(request: Request) {
           actorId: access.user.id, actorName: access.user.fullName, action: "PAYMENT_ENTITY_CREATED",
           entityType: "PAYMENT_ENTITY", entityId: created.id,
           newValue: { name: created.name, code: created.code }, ip, userAgent,
-        });
-        return created;
-      });
-      return NextResponse.json(result, { status: 201 });
-    } else if (parsed.data.type === "currency") {
-      const currencyData = parsed.data;
-      const result = await db.$transaction(async (tx) => {
-        const created = await tx.paymentCurrency.create({ data: {
-          code: currencyData.code,
-          name: currencyData.name,
-          symbol: currencyData.symbol,
-          decimalPlaces: currencyData.decimalPlaces,
-        } });
-        await recordAudit(tx, {
-          actorId: access.user.id, actorName: access.user.fullName, action: "PAYMENT_CURRENCY_CREATED",
-          entityType: "PAYMENT_CURRENCY", entityId: created.code,
-          newValue: { code: created.code, name: created.name, decimalPlaces: created.decimalPlaces, symbol: created.symbol },
-          ip, userAgent,
         });
         return created;
       });
@@ -217,7 +200,6 @@ export async function PATCH(request: Request) {
   const parsed = z.object({ type: masterType, id: z.string().min(1), isActive: z.boolean() }).safeParse(body);
   if (!parsed.success) return jsonError("Invalid master data.", 400);
   const { type, id, isActive } = parsed.data;
-  if (type === "currency" && id === "USD" && !isActive) return jsonError("USD cannot be deactivated.", 400);
   const { ip, userAgent } = auditContext(request);
   try {
     await db.$transaction(async (tx) => {
@@ -229,16 +211,6 @@ export async function PATCH(request: Request) {
           actorId: access.user.id, actorName: access.user.fullName,
           action: isActive ? "PAYMENT_ENTITY_ACTIVATED" : "PAYMENT_ENTITY_DEACTIVATED",
           entityType: "PAYMENT_ENTITY", entityId: id,
-          previousValue: { isActive: previous.isActive }, newValue: { isActive }, ip, userAgent,
-        });
-      } else if (type === "currency") {
-        const previous = await tx.paymentCurrency.findUnique({ where: { code: id }, select: { isActive: true } });
-        if (!previous) throw Object.assign(new Error("Master value not found."), { code: "P2025" });
-        await tx.paymentCurrency.update({ where: { code: id }, data: { isActive } });
-        if (previous.isActive !== isActive) await recordAudit(tx, {
-          actorId: access.user.id, actorName: access.user.fullName,
-          action: isActive ? "PAYMENT_CURRENCY_ACTIVATED" : "PAYMENT_CURRENCY_DEACTIVATED",
-          entityType: "PAYMENT_CURRENCY", entityId: id,
           previousValue: { isActive: previous.isActive }, newValue: { isActive }, ip, userAgent,
         });
       } else if (type === "costCenter") {
