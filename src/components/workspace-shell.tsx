@@ -163,10 +163,6 @@ export function WorkspaceShell({
           </Link>
         </nav>
         <div className="sidebar-bottom">
-          <div className="security-note">
-            <span className="security-icon"><ShieldCheck size={17} /></span>
-            <span><strong>Protected workspace</strong><small>Access is role controlled</small></span>
-          </div>
           <button className="help-link" type="button" aria-expanded={supportOpen} onClick={() => setSupportOpen(!supportOpen)}>
             <CircleHelp size={17} /><span>Help &amp; support</span><ArrowUpRight size={14} className="help-external" />
           </button>

@@ -73,3 +73,9 @@
 
 - Removed the generic administrator dropdown setup warning from create/edit payment request forms as requested. Field validation and dropdown options remain unchanged.
 - Verification: targeted ESLint and git diff whitespace checks passed. Publishing to JSAN_PAYTRIVA main under existing push authorization.
+
+
+### 2026-11-16 - Remove sidebar protection note
+
+- Removed the Protected workspace / Access is role controlled block from the sidebar as requested.
+- Verification: targeted ESLint and diff checks passed. Publishing to JSAN_PAYTRIVA main under existing push authorization.
