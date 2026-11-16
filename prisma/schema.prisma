@@ -1,0 +1,604 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TokenPurpose {
+  ACTIVATION
+  PASSWORD_RESET
+}
+
+enum PaymentStatus {
+  DRAFT
+  PENDING_REVIEW
+  UNDER_REVIEW
+  PENDING_APPROVAL
+  RETURNED
+  NEEDS_INFORMATION
+  APPROVED
+  REJECTED
+  PAID
+  CANCELLED
+}
+
+enum DocumentKind {
+  INVOICE
+  ATTACHMENT
+  PAYMENT_PROOF
+}
+
+enum FinancialRuleKind {
+  WITHHOLDING_TAX
+  OTHER_DEDUCTION
+}
+
+enum FinancialRuleCalculation {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+}
+
+enum PaymentRiskStatus {
+  ON_TRACK
+  AT_RISK
+}
+
+model User {
+  id                String                  @id @default(cuid())
+  fullName          String
+  email             String                  @unique
+  timeZone          String                  @default("UTC")
+  passwordHash      String?
+  isActive          Boolean                 @default(true)
+  activatedAt       DateTime?
+  lastLoginAt       DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  roles             UserRole[]
+  permissions       UserPermission[]
+  sessions          AuthSession[]
+  sentInvitations   Invitation[]            @relation("InvitedBy")
+  receivedInvites   Invitation[]            @relation("Invitee")
+  tokens            AccountToken[]
+  paymentRequests   PaymentRequest[]        @relation("PaymentRequestor")
+  paymentHistory    PaymentRequestHistory[]
+  uploadedDocuments PaymentDocument[]
+  approvalThresholds ApprovalThreshold[]
+  approvalAssignments ApprovalAssignment[]
+  approvalComments ApprovalComment[]
+  clarificationRequests ClarificationRequest[]
+  resolvedClarifications ClarificationRequest[] @relation("ClarificationResolver")
+  notifications      Notification[]
+  emailDeliveries   EmailDelivery[]
+  notificationSettingsUpdated NotificationSettings[] @relation("NotificationSettingsUpdater")
+  notificationTemplatesUpdated NotificationTemplate[] @relation("NotificationTemplateUpdater")
+  paymentSchedulesCreated PaymentSchedule[] @relation("PaymentScheduleCreator")
+  paymentScheduleHistory PaymentScheduleHistory[] @relation("PaymentScheduleHistoryActor")
+  paymentConfirmationsProcessed PaymentConfirmation[] @relation("PaymentProcessor")
+  paymentCorrections PaymentCorrection[]
+  auditLogs         AuditLog[]              @relation("AuditActor")
+
+  @@index([isActive, createdAt])
+}
+
+model PaymentRequest {
+  id                 String                  @id @default(cuid())
+  transactionId      String                  @unique
+  requestorId        String
+  status             PaymentStatus           @default(DRAFT)
+  vendorName         String?
+  description        String?
+  billToEntityId     String?
+  billFrom           String?
+  invoiceNumber      String?
+  invoiceDate        DateTime?
+  serviceStartDate   DateTime?
+  serviceEndDate     DateTime?
+  currencyCode       String?
+  invoiceAmount      Decimal?                @db.Decimal(20, 6)
+  invoiceAmountUsd   Decimal?                @db.Decimal(20, 6)
+  taxAmount          Decimal?                @db.Decimal(20, 6)
+  totalPayable       Decimal?                @db.Decimal(20, 6)
+  finalValueUsd      Decimal?                @db.Decimal(20, 6)
+  exchangeRate       Decimal?                @db.Decimal(24, 12)
+  exchangeRateSource String?
+  conversionDate     DateTime?
+  dueDate            DateTime?
+  costCenterId       String?
+  projectId          String?
+  duplicateKey       String?                 @unique
+  submittedAt        DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  requestor          User                    @relation("PaymentRequestor", fields: [requestorId], references: [id], onDelete: Restrict)
+  billToEntity       PaymentEntity?          @relation(fields: [billToEntityId], references: [id], onDelete: Restrict)
+  currency           PaymentCurrency?        @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+  costCenter         CostCenter?             @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  project            PaymentProject?         @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  documents          PaymentDocument[]
+  history            PaymentRequestHistory[]
+  approvalAssignments ApprovalAssignment[]
+  approvalComments    ApprovalComment[]
+  clarificationRequests ClarificationRequest[]
+  notifications         Notification[]
+  paymentSchedule       PaymentSchedule?
+  scheduleHistory       PaymentScheduleHistory[]
+  paymentConfirmation  PaymentConfirmation?
+  paymentCorrections    PaymentCorrection[]
+
+  @@index([requestorId, status, updatedAt])
+  @@index([status, submittedAt])
+  @@index([projectId, status])
+  @@index([vendorName, invoiceNumber])
+  @@index([dueDate])
+}
+
+model PaymentDocument {
+  id         String          @id @default(cuid())
+  requestId  String?
+  ownerId    String
+  kind       DocumentKind
+  filename   String
+  storageKey String          @unique
+  mimeType   String
+  sizeBytes  Int
+  createdAt  DateTime        @default(now())
+  request    PaymentRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  owner      User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  paymentProof PaymentConfirmation? @relation("PaymentProofDocument")
+
+  @@index([requestId, kind])
+  @@index([ownerId, createdAt])
+}
+
+model PaymentRequestHistory {
+  id          String         @id @default(cuid())
+  requestId   String
+  actorId     String?
+  action      String
+  fromStatus  PaymentStatus?
+  toStatus    PaymentStatus?
+  description String?
+  createdAt   DateTime       @default(now())
+  request     PaymentRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor       User?          @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([requestId, createdAt])
+}
+
+model ApprovalThreshold {
+  id                 String   @id @default(cuid())
+  label              String   @unique
+  minUsd             Decimal  @db.Decimal(20, 6)
+  maxUsdExclusive    Decimal? @db.Decimal(20, 6)
+  assignedApproverId String?
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  assignedApprover   User?    @relation(fields: [assignedApproverId], references: [id], onDelete: SetNull)
+  assignments        ApprovalAssignment[]
+
+  @@index([isActive, minUsd, maxUsdExclusive])
+}
+
+model ApprovalAssignment {
+  id          String             @id @default(cuid())
+  requestId   String
+  approverId  String
+  thresholdId String
+  assignedAt  DateTime           @default(now())
+  resolvedAt  DateTime?
+  request     PaymentRequest     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  approver    User               @relation(fields: [approverId], references: [id], onDelete: Restrict)
+  threshold   ApprovalThreshold  @relation(fields: [thresholdId], references: [id], onDelete: Restrict)
+  comments    ApprovalComment[]
+  reminderSchedule ReminderSchedule?
+
+  @@index([approverId, resolvedAt, assignedAt])
+  @@index([requestId, assignedAt])
+}
+
+model ApprovalComment {
+  id           String              @id @default(cuid())
+  requestId    String
+  actorId      String
+  assignmentId String?
+  action       String
+  content      String
+  createdAt    DateTime            @default(now())
+  request      PaymentRequest      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor        User                @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  assignment   ApprovalAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+
+  @@index([requestId, createdAt])
+}
+
+model ClarificationRequest {
+  id           String    @id @default(cuid())
+  requestId    String
+  createdById  String
+  reason       String
+  createdAt    DateTime  @default(now())
+  resolvedAt   DateTime?
+  resolvedById String?
+  request      PaymentRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  createdBy    User      @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  resolvedBy   User?     @relation("ClarificationResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([requestId, resolvedAt, createdAt])
+}
+
+model Notification {
+  id        String         @id @default(cuid())
+  userId    String
+  requestId String?
+  title     String
+  message   String
+  href      String?
+  category  String         @default("general")
+  templateKey String?
+  eventKey  String?
+  createdAt DateTime       @default(now())
+  readAt    DateTime?
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  request   PaymentRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  emailDeliveries EmailDelivery[]
+
+  @@unique([userId, eventKey])
+  @@index([userId, readAt, createdAt])
+  @@index([userId, category, createdAt])
+}
+
+model EmailDelivery {
+  id             String                    @id @default(cuid())
+  notificationId String
+  recipientId    String
+  recipientEmail String
+  eventKey       String                    @unique
+  status         NotificationDeliveryStatus @default(PENDING)
+  attempts       Int                       @default(0)
+  nextAttemptAt  DateTime                  @default(now())
+  sentAt         DateTime?
+  lastError      String?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  notification   Notification              @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  recipient      User                      @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([recipientId, createdAt])
+}
+
+model ReminderSchedule {
+  id             String             @id @default(cuid())
+  assignmentId   String             @unique
+  nextReminderAt DateTime?
+  nextStage      Int                @default(1)
+  canceledAt     DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  assignment     ApprovalAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([nextReminderAt, canceledAt])
+}
+
+model NotificationSettings {
+  id                  String   @id @default("default")
+  emailEnabled        Boolean  @default(true)
+  enabledCategories   Json
+  reminderHours       Json
+  smtpHost            String?
+  smtpPort            Int      @default(587)
+  smtpSecure          Boolean  @default(false)
+  smtpUser            String?
+  smtpPasswordCipher  String?
+  smtpFrom            String?
+  updatedAt           DateTime @updatedAt
+  updatedById         String?
+  updatedBy           User?    @relation("NotificationSettingsUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+model NotificationTemplate {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  subject     String
+  body        String
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("NotificationTemplateUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+model PaymentSchedule {
+  id                   String            @id @default(cuid())
+  requestId            String            @unique
+  // plannedDate is the effective scheduled payment date (the eligible Wednesday the
+  // engine computes, or an AP override). It is kept separate from the invoice due date.
+  plannedDate          DateTime?
+  earliestEligibleDate DateTime?
+  riskStatus           PaymentRiskStatus @default(ON_TRACK)
+  autoScheduled        Boolean           @default(false)
+  remarks              String?
+  createdById          String
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  request              PaymentRequest    @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  createdBy            User              @relation("PaymentScheduleCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([plannedDate])
+  @@index([riskStatus, plannedDate])
+}
+
+// Centralized, append-only audit trail for security-, administration-, and payment-sensitive
+// events. Complements the domain history tables (payment request/schedule history, correction
+// snapshots). Rows are never updated or deleted by application code; a deleted actor is
+// nulled out (SetNull) while the captured actorName and values are retained.
+model AuditLog {
+  id            String   @id @default(cuid())
+  actorId       String?
+  actorName     String
+  action        String
+  entityType    String
+  entityId      String?
+  summary       String?
+  previousValue Json?
+  newValue      Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+  actor         User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action, createdAt])
+}
+
+model PaymentScheduleHistory {
+  id                   String             @id @default(cuid())
+  requestId            String
+  actorId              String?
+  action               String
+  scheduledDate        DateTime?
+  earliestEligibleDate DateTime?
+  dueDate              DateTime?
+  riskStatus           PaymentRiskStatus?
+  note                 String?
+  createdAt            DateTime           @default(now())
+  request              PaymentRequest     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actor                User?              @relation("PaymentScheduleHistoryActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([requestId, createdAt])
+}
+
+model PaymentConfirmation {
+  id               String         @id @default(cuid())
+  requestId        String         @unique
+  amountPaid       Decimal        @db.Decimal(20, 6)
+  currencyCode     String         @db.VarChar(3)
+  amountPaidUsd    Decimal        @db.Decimal(20, 6)
+  exchangeRate     Decimal        @db.Decimal(24, 12)
+  exchangeRateSource String
+  actualPaymentDate DateTime
+  paymentReference String         @unique
+  paymentMethod    String
+  paymentAccount   String
+  remarks          String?
+  proofDocumentId String         @unique
+  processedById   String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  request         PaymentRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  currency        PaymentCurrency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+  proofDocument   PaymentDocument @relation("PaymentProofDocument", fields: [proofDocumentId], references: [id], onDelete: Restrict)
+  processedBy     User           @relation("PaymentProcessor", fields: [processedById], references: [id], onDelete: Restrict)
+  corrections     PaymentCorrection[]
+
+  @@index([actualPaymentDate])
+  @@index([processedById, createdAt])
+}
+
+model PaymentCorrection {
+  id             String              @id @default(cuid())
+  requestId      String
+  confirmationId String
+  actorId        String
+  reason         String
+  previousValues Json
+  correctedValues Json
+  createdAt      DateTime            @default(now())
+  request        PaymentRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  confirmation   PaymentConfirmation @relation(fields: [confirmationId], references: [id], onDelete: Restrict)
+  actor          User                @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt])
+  @@index([confirmationId, createdAt])
+}
+
+model PaymentCurrency {
+  code           String                 @id @db.VarChar(3)
+  name           String
+  symbol         String
+  decimalPlaces  Int                    @default(2)
+  isActive       Boolean                @default(true)
+  createdAt      DateTime               @default(now())
+  requests       PaymentRequest[]
+  rates          CurrencyExchangeRate[]
+  financialRules PaymentFinancialRule[]
+  confirmations  PaymentConfirmation[]
+
+  @@index([isActive, name])
+}
+
+model CurrencyExchangeRate {
+  id           String          @id @default(cuid())
+  currencyCode String          @db.VarChar(3)
+  usdPerUnit   Decimal         @db.Decimal(24, 12)
+  source       String
+  effectiveAt  DateTime
+  fetchedAt    DateTime        @default(now())
+  currency     PaymentCurrency @relation(fields: [currencyCode], references: [code], onDelete: Cascade)
+
+  @@unique([currencyCode, source, effectiveAt])
+  @@index([currencyCode, effectiveAt])
+}
+
+model PaymentFinancialRule {
+  id           String                   @id @default(cuid())
+  name         String                   @unique
+  ruleKind     FinancialRuleKind
+  calculation  FinancialRuleCalculation
+  value        Decimal                  @db.Decimal(20, 6)
+  currencyCode String?                  @db.VarChar(3)
+  isActive     Boolean                  @default(true)
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  currency     PaymentCurrency?         @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+
+  @@index([isActive, ruleKind])
+}
+
+model PaymentEntity {
+  id        String           @id @default(cuid())
+  name      String           @unique
+  code      String?          @unique
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  requests  PaymentRequest[]
+
+  @@index([isActive, name])
+}
+
+model CostCenter {
+  id        String           @id @default(cuid())
+  name      String
+  code      String           @unique
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  requests  PaymentRequest[]
+
+  @@index([isActive, name])
+}
+
+model PaymentProject {
+  id        String           @id @default(cuid())
+  name      String
+  code      String?          @unique
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  requests  PaymentRequest[]
+
+  @@index([isActive, name])
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  name        String
+  description String
+  users       UserRole[]
+  permissions RolePermission[]
+  invitations Invitation[]
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  description String
+  roles       RolePermission[]
+  users       UserPermission[]
+}
+
+model UserRole {
+  userId       String
+  roleId       String
+  assignedAt   DateTime @default(now())
+  assignedById String?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model UserPermission {
+  userId       String
+  permissionId String
+  grantedAt    DateTime   @default(now())
+  grantedById  String?
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@index([permissionId])
+}
+
+model Invitation {
+  id          String         @id @default(cuid())
+  userId      String
+  invitedById String
+  roleId      String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime       @default(now())
+  user        User           @relation("Invitee", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy   User           @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Restrict)
+  role        Role           @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  tokens      AccountToken[]
+
+  @@index([userId, expiresAt])
+}
+
+model AccountToken {
+  id           String       @id @default(cuid())
+  userId       String
+  invitationId String?
+  purpose      TokenPurpose
+  tokenHash    String       @unique
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime     @default(now())
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitation   Invitation?  @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, expiresAt])
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model LoginThrottle {
+  key           String    @id
+  attempts      Int       @default(0)
+  windowStarted DateTime  @default(now())
+  blockedUntil  DateTime?
+  updatedAt     DateTime  @updatedAt
+}

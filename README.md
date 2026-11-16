@@ -1,601 +1,195 @@
-# FleetGo
+# PAYTRIVA — JSAN Enterprise Financial Control Platform
 
-> **Railway production hosting:** follow [DEPLOY.md](DEPLOY.md) and the root [.env.example](.env.example). The image serves the UI/API/WebSocket together, uses a PostgreSQL pre-deploy migration/bootstrap, and requires an upload volume at /data. Production never runs the demo seed. See [verification and remaining deployment setup](docs/RAILWAY_READINESS.md).
+PAYTRIVA is a Next.js application for JSAN Consulting's financial-control platform. It provides administrator-created employee accounts, database-backed sessions, role and permission enforcement, user administration, payment request management, AP-to-approver review workflow, audited manual payment confirmation, and a centralized audit log. It does not initiate payments or connect to a bank.
 
+## Stack
 
-**Enterprise Fleet Logistics Management Platform — CTS–Google Engagement**
+- Next.js App Router, React, and TypeScript
+- PostgreSQL with Prisma ORM and versioned SQL migrations
+- bcrypt password hashing, opaque single-use account tokens, and database-backed sessions
+- Zod request validation and server-side permission checks
 
-FleetGo is a centralized platform for managing the complete vehicle lifecycle:
-inventory, requests and approvals, allocation and dispatch, live GPS tracking,
-vehicle inspection and digital handover, vendor management, disk/media
-logistics, and operations reporting.
+## Local setup
 
-> **Status — Phase 5 implemented.**
-> **Phase 1** delivered the architecture, app shell, reusable UI library,
-> modular backend, PostgreSQL + Prisma connectivity and health-check API.
-> **Phase 2** added **Authentication, RBAC and User & Organization management**
-> (JWT access + rotating refresh tokens). See [`docs/PHASE2_AUTH.md`](docs/PHASE2_AUTH.md).
-> **Phase 3** adds **Fleet & Master Management** — vehicle registration and
-> lifecycle, a controlled status model, master data (makes/models/types/
-> categories/fuel/ownership/document types/depots), vehicle documents & photos,
-> and fleet dashboards. See [`docs/PHASE3_FLEET.md`](docs/PHASE3_FLEET.md).
-> **Phase 4** adds independent Inventory Management: receipts, imports, custody, reservations, transfers and reconciliation. See [`docs/PHASE4_INVENTORY.md`](docs/PHASE4_INVENTORY.md).
-> **Phase 5** adds Ticketing & Approvals: multi-type requests, a configurable
-> approval-workflow engine, SLA tracking, in-app notifications and read-only
-> inventory availability. See [`docs/PHASE5_TICKETING.md`](docs/PHASE5_TICKETING.md).
-> Remaining workflows (full allocation/dispatch, tracking, inspections) are
-> **not implemented yet** — see the [roadmap](#future-module-roadmap).
+1. Install Node.js 20.9 or later and PostgreSQL 16 or later.
+2. Copy `.env.example` to `.env` and set `DATABASE_URL`, `APP_URL`, and a bootstrap administrator email, name, and password. The bootstrap password must be at least 12 characters, no more than 72 UTF-8 bytes, and include uppercase and lowercase letters, a number, and a symbol. Set `ALLOWED_EMAIL_DOMAIN` to the actual JSAN employee email domain when confirmed; no domain is assumed by the application.
+3. Install dependencies and prepare the database:
 
-FleetGo operates as an **independent application**. It does **not** integrate
-with AtlasOps.
-
----
-
-## Table of Contents
-
-- [Technology Stack](#technology-stack)
-- [Architecture Overview](#architecture-overview)
-- [Repository / Folder Structure](#repository--folder-structure)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [PostgreSQL Setup](#postgresql-setup)
-- [Prisma Setup](#prisma-setup)
-- [Environment Configuration](#environment-configuration)
-- [Running the Application](#running-the-application)
-- [API Documentation](#api-documentation)
-- [Future Module Roadmap](#future-module-roadmap)
-- [Additional Documentation](#additional-documentation)
-
----
-
-## Technology Stack
-
-| Layer      | Technology                                                        |
-| ---------- | ----------------------------------------------------------------- |
-| Frontend   | React 18, Vite, TypeScript, React Router, Axios, **plain CSS**    |
-| Backend    | Node.js, Express, TypeScript (REST, `/api/v1`)                    |
-| Database   | PostgreSQL + Prisma ORM                                           |
-| Validation | Zod (environment + request validation)                           |
-| Security   | Helmet, CORS, compression                                        |
-| Readiness  | JWT (Phase 2), WebSocket (tracking), File/object storage         |
-
-> Tailwind CSS is **not** used. Styling is plain, modular CSS with a shared
-> design-token system (`frontend/src/styles/variables.css`).
-
----
-
-## Architecture Overview
-
-FleetGo is a **monorepo** with two independently maintainable applications and
-a shared documentation set:
-
-```
-FleetGo/
-├── backend/    Express + TypeScript + Prisma REST API
-├── frontend/   React + Vite + TypeScript single-page app
-└── docs/       Architecture & inventory-module design
-```
-
-The **backend** is organized by business domain under `src/modules/*`. Each
-domain owns its own controller → service → repository → routes → validators,
-giving every module clear API and service boundaries. Only the `health` module
-is active in Phase 1; the remaining 14 domains are scaffolded as placeholders.
-
-The **frontend** separates a reusable UI component library (`components/`),
-structural `layouts/`, and feature `modules/`. **Inventory Management is a
-standalone top-level module** — it is not nested under Fleet Management.
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design and
-[`docs/INVENTORY_ARCHITECTURE.md`](docs/INVENTORY_ARCHITECTURE.md) for the
-Inventory module's planned entities and cross-module interactions.
-
----
-
-## Repository / Folder Structure
-
-### Backend (`backend/`)
-
-```
-src/
-├── config/          Env validation (Zod) + typed app config
-├── database/        Prisma client singleton + connectivity helpers
-├── middlewares/     requestLogger, validate, notFound, errorHandler
-├── modules/         Business domains (controller/service/repository/routes/validators)
-│   ├── health/      ✅ implemented (health-check)
-│   ├── auth/        ▫ placeholder (Phase 2)
-│   ├── users/       ▫ placeholder (Phase 2)
-│   ├── fleet/       ▫ placeholder
-│   ├── inventory/   ▫ placeholder (Phase 4)
-│   ├── tickets/ allocation/ dispatch/ tracking/ inspections/
-│   ├── vendors/ reports/ disk-logistics/ notifications/ audit/
-├── routes/          API v1 router aggregator
-├── types/           Shared backend types
-├── utils/           logger, ApiError, ApiResponse, asyncHandler, storage/
-├── validators/      Shared Zod schemas (pagination, id params)
-├── app.ts           Express app factory
-└── server.ts        HTTP bootstrap + graceful shutdown
-prisma/
-└── schema.prisma    Datasource + generator (no business models yet)
-```
-
-### Frontend (`frontend/`)
-
-```
-src/
-├── assets/          Static assets
-├── components/      Reusable UI library (Button, Card, DataTable, Modal, …)
-├── layouts/         AppLayout, Sidebar, Header
-├── pages/           Shared pages (ModulePlaceholder, NotFound)
-├── modules/         Feature modules (dashboard, fleet, inventory, …)
-├── routes/          Router + navigation config (single source of truth)
-├── services/        Axios client + per-domain API services
-├── hooks/           Reusable hooks (useHealth, useDocumentTitle)
-├── context/         React contexts (SidebarContext)
-├── styles/          Design tokens + global CSS
-├── types/           Shared TS types (API contracts)
-└── utils/           Helpers (classNames)
-```
-
----
-
-## Prerequisites
-
-- **Node.js** ≥ 18 (developed on Node 24)
-- **npm** ≥ 9
-- **PostgreSQL** ≥ 14 running locally or reachable via `DATABASE_URL`
-
----
-
-## Installation
-
-Clone the repository, then install dependencies for each application:
-
-```bash
-# Backend
-cd backend
-npm install
-
-# Frontend (in a separate terminal)
-cd frontend
-npm install
-```
-
----
-
-## PostgreSQL Setup
-
-FleetGo needs a PostgreSQL database. Any PostgreSQL ≥ 14 works; use **one** of
-the options below.
-
-### Option A — Dedicated local cluster (recommended for dev, no Docker)
-
-This repo includes a helper that creates an **isolated** PostgreSQL cluster from
-your installed PostgreSQL binaries on port **5433**, separate from any existing
-instance. It matches the `DATABASE_URL` shipped in `backend/.env.example`.
-
-```powershell
-# One-time: create the cluster + 'fleetgo' database, then start it
-pwsh ./scripts/local-db.ps1 init
-
-# Thereafter
-pwsh ./scripts/local-db.ps1 start     # start
-pwsh ./scripts/local-db.ps1 stop      # stop
-pwsh ./scripts/local-db.ps1 status    # status
-```
-
-> The bundled cluster uses superuser `fleetgo` / password `fleetgo_dev_pwd`,
-> database `fleetgo`. Edit the port/paths at the top of the script if needed and
-> keep `backend/.env` `DATABASE_URL` in sync.
-
-### Option B — Use your own PostgreSQL
-
-1. Create a database and role, e.g.:
-
-   ```sql
-   CREATE DATABASE fleetgo;
+   ```powershell
+   npm install
+   npm run db:generate
+   npm run db:migrate
+   npm run db:seed
    ```
 
-2. Set `DATABASE_URL` in `backend/.env` to your instance:
+4. Start the app with `npm run dev`.
 
-   ```
-   DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/fleetgo?schema=public"
-   ```
+Private invoice uploads are stored under `.private-uploads` by default, outside `public`. Set `PAYTRIVA_UPLOAD_DIR` to an absolute path on a persistent private volume in production, and set the file-size limits as needed. Back up the private storage alongside the database; document metadata alone is not sufficient to recover uploaded files.
 
-> The backend starts even if the database is unreachable — it reports a
-> `degraded` status via the health endpoint. Connect the database and the
-> status flips to `ok`.
+The seed creates the Requestor, Accounts Payable, and Approver roles and their baseline permissions. Requestors receive own-request permissions; Accounts Payable can read submitted requests; Approvers retain access only to requests assigned to them. It creates the initial administrator as an Accounts Payable user with separate `platform:admin` and `payments:manage_masters` permissions. The seed also creates the USD base currency. The approval migration installs four USD bands, initially without assigned users; an administrator must assign active Approver-role users in **Approval matrix**. It does not add example vendors, entities, projects, cost centers, exchange rates, or payment requests. Bootstrap credentials are read from the environment, never printed, and an existing account's password is not reset when seeding again.
 
----
+### Employee creation and email
 
-## Prisma Setup
+Administrators create employees directly in **User management → Create employee**: they set the name, work email, role, and an initial password (which must meet the password policy), and the account is active immediately and can sign in. Platform administrators may also grant additional permissions at creation or later via **Manage access**. Every creation and permission change is recorded in the audit log.
 
-```bash
-cd backend
+Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and an HTTPS `APP_URL` to deliver password-reset links and notification email. SMTP is optional for local development: when unconfigured, a reset link is shown only in the development password-recovery response and notification email is queued rather than sent. These links are never written to logs. Password-reset links expire after `PASSWORD_RESET_EXPIRY_MINUTES` (30 by default), are single-use, and revoke existing sessions when used.
 
-# 1. Generate the Prisma client
-npm run prisma:generate
+## Roles and authorization
 
-# 2. Apply migrations (creates the Phase 2 auth/RBAC/organization tables)
-npm run prisma:migrate       # development
-# or, for an existing migration history / production:
-npm run prisma:deploy
+Roles and permissions are persisted in the database. The standard roles receive only these baseline capabilities:
 
-# 3. Seed roles, permissions, synthetic organizations and test users
-npm run db:seed              # idempotent — safe to re-run
-```
+| Role | Baseline access |
+|---|---|
+| Requestor | Own profile and own payment requests |
+| Accounts Payable | AP workspace, employee directory, employee creation, role assignment, account activation/deactivation, submitted payment requests |
+| Approver | Assigned approval workspace |
 
-Other useful commands:
+Payment master data and exchange rates require the explicit `payments:manage_masters` permission. AP membership does not automatically grant platform administration or master-data administration. Requestors can only read and change their own drafts and requests. AP users can read submitted requests, but never drafts.
 
-```bash
-npm run prisma:studio        # browse data in Prisma Studio
-```
+Administrators can also define and activate percentage or fixed-amount withholding-tax and other-deduction rules. These records remain configuration for future financial rules and do not alter request totals.
 
-> After seeding you can sign in with the development accounts below (all use
-> password **`FleetGo123`**).
+## Payment requests
 
----
+Requestors create a draft, add a required invoice and optional attachments, then submit it for **Pending Review**. AP must start a review and explicitly forward the validated request before it can enter **Pending Approval**. The assigned approver can approve, reject, or request clarification. An approval moves the request to **Approved** for the AP payment queue. Clarification returns the request to its owner, who can update and resubmit it to AP. All status changes, comments, assignments, and clarification events are retained in an append-only history.
 
-## Environment Configuration
+The default USD bands are below $5,000; $5,000–$39,999.99; $40,000–$49,999.99; and $50,000 or more. Routing uses the saved **Final value (USD)**. The $40,000–$49,999.99 band is explicitly marked as pending business confirmation and blocks forwarding until configured. No approver identity or email is hardcoded; a user with `payments:manage_masters` assigns active Approver-role users to each band in **Approval matrix**. Threshold assignments apply to future AP forwards; previously assigned approvals are preserved. In-app and queued email notifications are generated for request submission and resubmission, approval assignment, clarification, returns, approval decisions, and payment confirmation. Approval reminder schedules are persisted per assignment, use configurable hour intervals (default 8/24/48), and are canceled when the assignment is resolved or the request leaves pending approval.
 
-Copy the example files and adjust values. **Never commit real secrets.**
+## AP payment processing
 
-```bash
-# Backend
-cd backend
-cp .env.example .env        # Windows PowerShell: Copy-Item .env.example .env
+The AP workspace provides review, management metrics, an approved-and-unpaid payment queue, calendar views, and project payment summaries. Queue filters include vendor, project, currency, approver, transaction ID, invoice/due dates, and search; queue results can be paginated, sorted, bulk scheduled, and exported as CSV. The calendar groups scheduled dates separately from the original invoice due date, and highlights due-this-week, overdue, Wednesday-scheduled, and completed items.
 
-# Frontend
-cd frontend
-cp .env.example .env        # Windows PowerShell: Copy-Item .env.example .env
-```
+Payment schedules can only be changed for approved unpaid requests. AP records payments already made outside PAYTRIVA using the confirmation form; confirmation requires amount, currency, actual date, a unique payment reference, payment method/account, and valid PDF/JPG/PNG proof. Confirmation and status updates are written in one database transaction, and each request can only be confirmed once. Proof files are stored privately and served only to AP users or users with `payments:read_payment_proof`. Payment-account values are masked unless the viewer has `payments:read_payment_account`.
 
-Key variables:
+Only users with both `ap:access` and explicit `payments:correct` permission can correct a confirmed payment. A reason is mandatory, each correction stores before/after snapshots and actor/time, and a corresponding status-history entry is appended. The bootstrap administrator receives this permission; ordinary AP membership does not grant corrections or restricted account visibility. Manual confirmation records an external payment; PAYTRIVA does not initiate transfers or integrate with banks.
 
-| File             | Variable            | Purpose                                        |
-| ---------------- | ------------------- | ---------------------------------------------- |
-| `backend/.env`   | `PORT`              | API port (default `4000`)                      |
-| `backend/.env`   | `DATABASE_URL`      | PostgreSQL connection string                   |
-| `backend/.env`   | `CORS_ORIGINS`      | Comma-separated allowed origins                |
-| `backend/.env`   | `STORAGE_DRIVER`    | `local` \| `s3` \| `gcs` (readiness)           |
-| `backend/.env`   | `JWT_ACCESS_SECRET` | Secret for short-lived access tokens           |
-| `backend/.env`   | `JWT_REFRESH_SECRET`| Secret for refresh-token signing               |
-| `backend/.env`   | `COOKIE_SAMESITE`   | Refresh cookie SameSite (`strict`/`lax`/`none`)|
-| `backend/.env`   | `AUTH_RATE_LIMIT_MAX` | Max auth attempts per window (brute-force)   |
-| `frontend/.env`  | `VITE_API_BASE_URL` | API base (default `/api/v1`, proxied in dev)   |
+## Payment calendar and financial tracking
 
-> Generate strong secrets with:
-> `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`
+JSAN pays on a weekly cycle, every Wednesday, with a minimum seven calendar-day lead time measured from the payment request submission date. When a request is approved, the backend scheduling engine (`src/lib/payment-scheduling.ts`) computes the earliest eligible payment date (submission + 7 days) and the first eligible Wednesday on or after it, and stores both the scheduled payment date and the earliest eligible date on the payment schedule. All scheduling arithmetic is performed server-side in UTC on date-only values so results do not shift with server or viewer time zones; for example a request submitted on 04-Nov-2026 (Wednesday) is scheduled for 11-Nov-2026 (Wednesday). Frontend date math is never used for scheduling.
 
----
+The original invoice due date is stored separately and never modified. If the earliest eligible Wednesday falls after the invoice due date, the request is flagged **at risk** (`PaymentRiskStatus.AT_RISK`) and AP is notified; ineligible payments are never silently scheduled. AP can manually reschedule an approved, unpaid request, but a date before the seven-day minimum is rejected and risk is re-evaluated against the due date. Every calculation and change is appended to an immutable `PaymentScheduleHistory` trail shown on the request detail.
 
-## Running the Application
+The **Payment calendar** (`/workspace/calendar`) offers month, week, and day views with upcoming Wednesday cycles, and classifies each payment as upcoming, due this week, overdue, at risk, or completed. A pending-approval invoice is never treated as overdue. The **Upcoming payments** view groups approved payments by scheduled Wednesday with per-date totals, invoice counts, and currency- and project-wise breakdowns. **Financial tracking** reports upcoming, due-this-week, overdue, at-risk, paid, and outstanding-approved totals plus currency, project, and vendor breakdowns, all converted to the USD reporting currency using the rate stored with each transaction. Calendar and summary data are role-scoped on the backend: requestors see only their own requests, approvers see requests assigned to them, and `payments:read_all` holders (AP and management) see the consolidated view. Scheduling, reschedules, due-this-week, overdue, and at-risk events raise in-app and email notifications through the Phase 5 service with deduplicated event keys.
 
-Open two terminals.
+## Management dashboard and financial reports
 
-**Backend** (`http://localhost:4000`):
+The consolidated management dashboard (`/workspace/management`) is gated by the configurable `reports:access` permission — not by hardcoded names or email checks. Platform administrators grant it per user from the employee screen in **User management** (when creating an employee or via **Manage access**), and the bootstrap administrator receives it by default. Every figure is computed from live database records in the USD reporting currency; nothing is hardcoded or dummy data.
 
-```bash
-cd backend
-npm run dev
-```
+The dashboard presents eight KPI cards — Total Open AP, Due This Week, Overdue Invoices, Total Paid, Pending Approvals, Approved and Waiting, Total Outstanding, and Total Payment Requests — each with its value, invoice count, optional previous-period comparison, and click-through to the matching report. Interactive charts cover monthly payment trends (requests, approvals, completed payments by real timestamps), status distribution, currency distribution (original and USD), and project expenditure. Dedicated reports provide approval aging (0–8/8–24/24–48/48+ hour buckets from the actual approval-assignment timestamps, with delays highlighted), project-wise expenditure (requested, approved, paid, outstanding, overdue, with cost centre), vendor-wise payments (invoices, value, paid, pending, overdue, last payment date), and upcoming and overdue payment reports. Global filters — date range, financial year (1 April–31 March), project, cost centre, vendor, payment status, currency, approver, and JSAN entity — apply to every card, chart, and report, and a previous equal-length period is compared when an explicit range is set.
 
-**Frontend** (`http://localhost:5173`):
+Calculation rules are enforced centrally: Total Paid uses only confirmed payment amounts, Outstanding excludes completed payments, overdue uses the original invoice due date, approval aging uses assignment timestamps, and currencies are never mixed without USD conversion. Each report exports to CSV, XLSX (via SheetJS), and PDF, stamped with the generation time and the selected filter criteria; exports run through the same permission check and filters as the on-screen data. Drill-down moves from KPI cards to the relevant report table and from any transaction row to its full payment detail.
 
-```bash
-cd frontend
-npm run dev
-```
+## Notifications and background worker
 
-The Vite dev server proxies `/api/*` to the backend, so no CORS configuration
-is needed in development. Open <http://localhost:5173> — you'll land on the
-**sign-in page**. Use a development account (below) to log in; the sidebar and
-pages adapt to your role's permissions.
+Notifications are scoped to each active user. The notification bell and **Notifications** page provide unread counts, read status, category/date filters, pagination, and links to the related request. The profile timezone preference is used to display notification timestamps; timestamps are stored in UTC.
 
-Production builds:
+Email messages use JSAN-branded templates and a database-backed outbox. Failed deliveries are retried with exponential backoff (up to five attempts); pending email and reminder state survives application restarts. Configure SMTP through the authorized **Notification settings** page or the existing `SMTP_*` environment variables. Admin-entered SMTP passwords are encrypted at rest; set a persistent `NOTIFICATION_SECRETS_KEY` on every app and worker instance before saving a password. Do not rotate or lose this key without first migrating the stored SMTP credential. SMTP credentials and the encryption key are never returned by the settings API.
 
-```bash
-cd backend  && npm run build && npm start
-cd frontend && npm run build && npm run preview
-```
+Administrators can edit distinct templates for request submission, approval assignment, approval reminders, clarifications/returns, approval confirmation, rejection, payment confirmation, and AP updates. Category controls independently enable or disable groups of in-app and email notifications.
 
----
-
-## API Documentation
-
-Base URL: `http://localhost:4000/api/v1`
-
-All responses use a standard envelope:
-
-```jsonc
-// Success
-{
-  "success": true,
-  "message": "FleetGo API is healthy",
-  "data": { /* ... */ },
-  "timestamp": "2026-11-02T10:00:00.000Z"
-}
-
-// Error
-{
-  "success": false,
-  "error": { "code": 404, "message": "Route not found: GET /api/v1/foo" },
-  "timestamp": "2026-11-02T10:00:00.000Z"
-}
-```
-
-### `GET /api/v1/health`
-
-Returns application status and database connectivity.
-
-- **200** when healthy, **503** when degraded (API up, database down).
-
-```jsonc
-{
-  "success": true,
-  "message": "FleetGo API is healthy",
-  "data": {
-    "application": "FleetGo",
-    "status": "ok",              // ok | degraded | down
-    "environment": "development",
-    "version": "1.0.0",
-    "uptimeSeconds": 42,
-    "database": { "status": "connected" },  // connected | disconnected
-    "timestamp": "2026-11-02T10:00:00.000Z"
-  },
-  "timestamp": "2026-11-02T10:00:00.000Z"
-}
-```
-
-### Authentication, Users, Roles & Organizations (Phase 2)
-
-Phase 2 adds authentication and administration endpoints under `/api/v1`:
-
-- `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`
-- `POST /auth/change-password`, `POST /auth/forgot-password`, `POST /auth/reset-password`
-- `GET|POST /users`, `GET|PUT /users/:id`, `PATCH /users/:id/status`, `POST /users/:id/reset-password`
-- `GET|POST /roles`, `GET|PUT /roles/:id`, `GET /permissions`
-- `GET|POST /organizations`, `GET|PUT /organizations/:id`
-
-Full request/response details, the token model, the RBAC permission matrix and
-security notes are in **[`docs/PHASE2_AUTH.md`](docs/PHASE2_AUTH.md)**.
-
-### Fleet & Master Data (Phase 3)
-
-- `GET /fleet/stats`, `GET /fleet/status-transitions`
-- `GET|POST /fleet/vehicles`, `GET|PUT|DELETE /fleet/vehicles/:id`,
-  `PATCH /fleet/vehicles/:id/status`, `GET /fleet/vehicles/:id/history`
-- `GET|POST /fleet/vehicles/:id/documents`,
-  `GET /fleet/vehicles/:id/documents/:docId/download`,
-  `DELETE /fleet/vehicles/:id/documents/:docId`
-- `GET|POST /master-data/:resource`, `PUT|DELETE /master-data/:resource/:id`,
-  `PATCH /master-data/:resource/:id/status`
-  (`:resource` = makes, models, categories, types, fuel-types,
-  ownership-types, document-types, depots)
-
-Details, the vehicle status lifecycle and the permission matrix are in
-**[`docs/PHASE3_FLEET.md`](docs/PHASE3_FLEET.md)**.
-
-### Development login accounts (synthetic — password `FleetGo123`)
-
-| Email | Role |
-| ----- | ---- |
-| superadmin@fleetgo.dev | Super Admin |
-| jsanadmin@fleetgo.dev | JSAN Admin |
-| opsmanager@fleetgo.dev | Operations Manager |
-| ctsuser@fleetgo.dev | CTS User |
-| vendor1@fleetgo.dev / vendor2@fleetgo.dev | Vendor User |
-| driver@fleetgo.dev | Transporter / Driver |
-
-> Remaining business endpoints (inventory, tickets, dispatch, tracking,
-> inspections) are **not** implemented yet. Each will be documented as its
-> module is built.
-
----
-
-## Future Module Roadmap
-
-| Phase | Scope                                                             |
-| ----- | ---------------------------------------------------------------- |
-| **1** | ✅ Project setup, architecture, UI shell, health API              |
-| **2** | ✅ Authentication, RBAC, User & Organization management (JWT)     |
-| **3** | ✅ Fleet & Master Management (vehicles, lifecycle, master data)   |
-| **4** | ✅ Inventory Management (receipts, import, custody, reservations, reconciliation) |
-| **5** | ✅ Ticketing & Approvals (configurable workflow engine, SLA, notifications) |
-| **6** | ✅ Vehicle Allocation, Dispatch & Trips                          |
-| **7** | ✅ Live GPS Tracking (WebSocket)                                 |
-| **8** | ✅ Inspection & Digital Handover (checklists, POD, discrepancies) |
-| **9** | ✅ Dashboard & Reporting (role-scoped aggregation, exports)      |
-| **10** | ✅ Disk & Media Logistics (custody, shipments, reconciliation)  |
-| **11** | ✅ Vendor Management (profiles, contacts, locations, users, inventory) |
-| **12** | ✅ Settings (system-settings registry + per-user preferences)    |
-
----
-
-## Additional Documentation
-
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system architecture, module
-  boundaries, request lifecycle, and key decisions.
-- [`docs/INVENTORY_ARCHITECTURE.md`](docs/INVENTORY_ARCHITECTURE.md) — Inventory
-  Management design, planned entities/relationships, and how it interacts with
-  Fleet, Allocation, Dispatch, Tracking, and Inspection.
-- [`docs/PHASE2_AUTH.md`](docs/PHASE2_AUTH.md) — authentication & RBAC design,
-  token model, full API reference, permission matrix, security checklist and
-  development test accounts.
-- [`docs/PHASE3_FLEET.md`](docs/PHASE3_FLEET.md) — Fleet & Master Management:
-  data model, vehicle status lifecycle, full API reference, RBAC additions,
-  file storage, and test results.
-- [`docs/PHASE4_INVENTORY.md`](docs/PHASE4_INVENTORY.md) — Inventory Management:
-  receipts, imports, custody, reservations, transfers, reconciliation.
-- [`docs/PHASE5_TICKETING.md`](docs/PHASE5_TICKETING.md) — Ticketing & Approvals:
-  ticket types, configurable approval-workflow engine, SLA, notifications,
-  inventory availability integration, API reference and test results.
-
-## Phase 4 — Inventory Management
-
-Inventory is now an independent, active top-level module. It includes database-derived dashboards, individual receipts and evidence, Excel/CSV import with preview and error reports, inventory search/filter/export, reservations, custody/movement history, transfers, reconciliation with independent review, and auditable corrections.
-
-Existing vehicles, depots, organizations/vendors, users and storage are reused. The commercial planning baseline remains **802 vehicles**; synthetic development records do not establish a confirmed production count.
-
-For an existing local setup:
+Run the persisted-job worker under a process supervisor in each production deployment:
 
 ```powershell
-cd backend
-npm install
-npm run prisma:generate
-npm run prisma:deploy
-npm run inventory:enable
-npm run dev
+npm run notifications:worker
 ```
 
-Open `/inventory` after signing in. Backend tests: `cd backend` then `npm run test:inventory` (creates retained synthetic `P4-` records). Frontend and backend production builds passed, and the final Phase 4 suite passed 100 assertions. See [Phase 4 API, screens, file summary, tests and known limitations](docs/PHASE4_INVENTORY.md) and [test output](docs/phase4-test-results.txt).
+The worker polls the database every 30 seconds for scheduled approval reminders, due/overdue AP notifications, and retryable email. It should be kept running independently of web requests (for example, as a Windows service or a supervised container process). Starting the Next.js app alone does not run scheduled jobs. No browser timer is used.
 
-Earlier Phase 1–3 sections describe their delivery milestones. Inventory is no longer a placeholder; ticketing, full allocation/dispatch, GPS tracking, inspections and disk logistics remain future work. Phase 4 adds integration contracts only for future workflows.
+Notification endpoints:
 
-## Phase 6 — Vehicle Allocation & Dispatch
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/notifications` | Current user's paginated notification history; supports `type`, `from`, `to`, `unread`, `page`, and `pageSize` |
+| PATCH | `/api/notifications` | Mark one current-user notification read, or all current-user notifications read |
+| GET | `/api/admin/notifications` | Admin-only category, reminder, SMTP-safe status, template, and delivery-log settings |
+| PATCH | `/api/admin/notifications` | Admin-only notification settings and template updates |
+| POST | `/api/admin/notifications` | Admin-only test email delivery |
 
-Vehicle Allocation and Dispatch & Trips are active at `/allocations` and `/dispatch`. Approved tickets link directly to allocation with requested/allocated/pending quantities. This phase adds multi-vehicle/partial allocation, availability selection, transport/driver management, checklists and original photographic evidence, guarded departure, trip milestones/timelines, exceptions, reporting and scoped tracking metadata.
+Email delivery is asynchronous and requires the worker. Deploy and apply the notification database migration after the earlier payment-processing migration before starting web or worker processes.
 
-Inventory changes remain centralized. Departure records transporter custody; arrival records DELIVERED status without prematurely making stock available before receiving verification. No GPS/maps, full receiving inspection or disk logistics were implemented.
+Entities, currencies, cost centers, projects, and exchange rates are managed under **Payment settings** by users with `payments:manage_masters`. Exchange rates are entered by an authorized administrator as USD per one unit of foreign currency, with a source and effective date. USD is treated as the base currency at 1:1; no other rate is guessed or hardcoded. A request submission uses the latest configured rate effective on or before its invoice date and saves the rate, source, and effective date used. Missing rates block submission.
 
-Existing installations:
+Invoices and attachments accept PDF, XLS, XLSX, and JPG/JPEG, with extension, MIME type, and file-signature checks. Files are stored outside the public directory under random private storage keys. Downloads and previews are served through authenticated routes after owner/AP permission checks. Configure persistent private storage before production deployment; multi-instance deployments need shared private object storage or a shared private volume.
 
-```powershell
-cd backend
-npm run prisma:generate
-npm run prisma:deploy
-npm run operations:enable
-npm run dev
-```
+The duplicate guard normalizes vendor, invoice number, and invoice value and stores a unique fingerprint for submitted requests. The database unique constraint prevents concurrent duplicates; drafts do not reserve an invoice fingerprint.
 
-Frontend: `cd frontend` then `npm run dev`. Both production builds pass. Validation: **134 Phase 6 workflow checks, 34 guard checks, and 139 inventory regression assertions passed**, plus targeted API/policy/filter checks. Tests retain synthetic development records.
+`platform:admin` and `reports:access` are not included in any standard role. Platform administrators grant them as explicit per-user permissions from the employee screen in **User management** (at creation or via **Manage access**). Both pages and API handlers check permissions on the server; hiding a navigation link is not an authorization boundary. Employee profile, role, status, and permission endpoints are independent of frontend checks. All administrative and payment-sensitive actions are recorded in the centralized audit log (`/admin/audit`, `platform:admin` only).
 
-See [Phase 6 API, architecture, screens, file summary, validation and pending integrations](docs/PHASE6_OPERATIONS.md). Stop here for review before Phase 7.
+## API endpoints
 
+| Method | Endpoint | Purpose / access |
+|---|---|---|
+| `POST` | `/api/auth/login` | Sign in with employee email and password |
+| `POST` | `/api/auth/logout` | Revoke the current database session |
+| `GET` | `/api/auth/session` | Return the current safe session identity |
+| `POST` | `/api/auth/activate` | Activate an invited account and set its password |
+| `POST` | `/api/auth/forgot-password` | Request a password-reset link |
+| `POST` | `/api/auth/reset-password` | Consume a reset link and update the password |
+| `GET` | `/api/users` | Search/filter/paginate employees; requires `users:read` |
+| `POST` | `/api/users` | Create an active employee with a role and password (plus optional admin-granted permissions); requires `users:invite` and `users:assign_role` |
+| `GET`, `PATCH` | `/api/users/me` | Read or update the signed-in employee's own profile |
+| `PATCH` | `/api/users/[id]/role` | Assign a standard role; requires `users:assign_role` |
+| `PATCH` | `/api/users/[id]/status` | Activate/deactivate an account; requires `users:activate` |
+| `PATCH` | `/api/admin/users/[id]/permissions` | Grant/revoke direct permissions from the employee screen; requires `platform:admin` |
+| `GET` | `/api/admin/audit` | Read the centralized audit log with filters/pagination; requires `platform:admin` |
+| `GET` | `/api/health` | Unauthenticated liveness/readiness probe (database check); no business data |
+| `GET` | `/api/payment-masters` | Read active dropdown values and configured exchange rates; requires payment request access |
+| `POST`, `PATCH` | `/api/payment-masters` | Create or deactivate entities, currencies, cost centers, projects, and rates; requires `payments:manage_masters` |
+| `GET`, `POST` | `/api/payment-requests` | Filter/paginate permitted requests or create a draft; POST requires `payments:create` |
+| `GET`, `PATCH` | `/api/payment-requests/[id]` | Read an authorized request or update/submit an owned draft |
+| `POST`, `DELETE` | `/api/payment-requests/[id]/documents` | Upload or remove documents on an owned draft |
+| `GET` | `/api/payment-documents/[id]` | Download or preview an authorized invoice/attachment |
+| `GET` | `/api/ap/reviews` | Filtered AP review queue; requires `ap:access` |
+| `POST` | `/api/payment-requests/[id]/workflow` | Start AP review, forward, return, reject, approve, or request clarification; action-specific AP/approver permission and status checks |
+| `GET` | `/api/ap/management` | AP dashboard metrics and filter options; requires `ap:access` |
+| `GET` | `/api/ap/payments` | Approved unpaid queue with filters, sort, pagination, or `?export=csv`; requires `ap:access` |
+| `GET` | `/api/ap/payments/[id]` | Read eligible payment confirmation details; requires `ap:access` |
+| `PATCH` | `/api/ap/payments/[id]/schedule` | Set or clear an approved request's planned payment date; requires `ap:access` |
+| `POST` | `/api/ap/payments/[id]/confirm` | Record an external payment and privately store proof; requires `ap:access` |
+| `POST` | `/api/ap/payments/[id]/corrections` | Correct a paid record with reason and audit snapshots; requires `ap:access` and `payments:correct` |
+| `GET` | `/api/ap/calendar` | Filter upcoming, due, overdue, Wednesday-scheduled, and completed payments; requires `ap:access` |
+| `GET` | `/api/ap/projects` | Project payment totals and invoice/payment filters; requires `ap:access` |
+| `GET` | `/api/payment-calendar` | Role-scoped calendar entries with live categories and Wednesday cycles; supports `from`, `to`, `vendor`, `projectId`, `category` |
+| `GET` | `/api/payment-calendar/upcoming` | Approved payments grouped by scheduled Wednesday with currency- and project-wise totals; supports `from`, `to`, `vendor`, `projectId` |
+| `GET` | `/api/payment-calendar/summary` | Role-scoped financial tracking: upcoming, due-this-week, overdue, at-risk, paid, and outstanding USD totals and currency/project/vendor breakdowns |
+| `GET` | `/api/management/dashboard` | KPI cards, trend/status/currency/project charts, and filter options; requires `reports:access`; supports the global filters below |
+| `GET` | `/api/management/reports/[type]` | `summary`, `project`, `vendor`, `aging`, `upcoming`, `overdue`, or `history` report as JSON, or `?format=csv\|xlsx\|pdf` download; requires `reports:access` |
+| `GET` | `/api/approvals` | Assigned approval records and dashboard metrics; requires `approvals:access` |
+| `GET`, `PATCH` | `/api/approval-matrix` | Read or assign USD-band approvers; requires `payments:manage_masters` |
+| `GET`, `PATCH` | `/api/notifications` | Read or mark the signed-in user's in-app notifications |
 
-## Phase 7 - Live GPS Tracking
+`POST /api/payment-requests/[id]/workflow` accepts one of these actions: `start_review`, `send_approval`, `clarification`, `return`, or `ap_reject` for AP; `approve`, `reject`, or `request_clarification` for the currently assigned approver. Rejection, return, and clarification actions require a non-empty `comment`. The endpoint enforces the current payment status and permission on the server and writes the status transition, audit event, assignment resolution, and notifications transactionally.
 
-Live tracking is available at /tracking: source-labelled live maps, authenticated WebSocket updates, vehicle details, chronological location history, route replay/export, device mappings, provider settings, geofences, alerts and reports. Real and simulated sources remain separate. GPS never confirms delivery or changes inventory/custody; existing Phase 6 operational actions remain authoritative.
+Payment list filters include full-text search, status, project, vendor, submission-created date range, sorting, and pagination. Payment detail includes the request snapshot, documents, financial conversion details, requestor, AP and approval actions, assignment history, clarification comments, the payment schedule (scheduled date, earliest eligible date, and risk status), the immutable scheduling history, payment confirmation, authorized payment proof, correction snapshots, and immutable request history.
 
-For an existing database, in backend run npm install, npm run prisma:generate, npm run prisma:deploy, npm run tracking:enable, then npm run dev. In frontend run npm install then npm run dev in a separate terminal.
+The future Microsoft 365 integration is not assumed or enabled. The current credential-based sign-in is isolated behind auth endpoints so an identity provider can be added as a distinct provider without weakening the existing authorization checks.
 
-Migration 20261103170000_phase7_tracking is applied. Both applications run locally: [frontend tracking](http://localhost:5173/tracking), backend http://localhost:4000. Register/map a device on a confirmed active trip before starting tracking; no coordinates are generated by default. Development manual observations are always SIMULATED.
+## Database
 
-Validation: **206 combined Phase 6/7 workflow assertions, 34 dispatch guard assertions, 159 inventory assertions, and 10 React/Leaflet map component assertions passed**. Frontend/backend builds pass; HTTP and WebSocket proxy checks pass. Synthetic test history is retained. Real browser visual/keyboard/mobile QA and hardware/provider acceptance remain outstanding; no production provider or credentials were supplied.
+`prisma/schema.prisma` defines the identity/authentication, payment request, AP and approval workflow, approval threshold/assignment, approval comment, clarification, notification, payment schedule, payment schedule history, payment confirmation, payment correction, audit log, and master-data models. The `AuditLog` model is an append-only, centralized record of security-, administration-, and payment-sensitive events (actor, action, entity, previous/new values, IP, and timestamp); the application never updates or deletes audit rows, and a deleted actor is nulled while the captured details are retained. The payment schedule carries the scheduled payment date, earliest eligible date, and a `PaymentRiskStatus` (`ON_TRACK`/`AT_RISK`) alongside the original invoice due date; `PaymentScheduleHistory` retains an append-only record of every scheduling calculation and change. Payment amounts and thresholds use PostgreSQL decimal types; duplicate fingerprints, transaction IDs, one-confirmation-per-request, and payment references have database uniqueness constraints. SQL migrations live under `prisma/migrations`; use `npm run db:migrate:dev` to create a migration during development and `npm run db:migrate` to apply committed migrations. Run the idempotent `npm run db:seed` after upgrading to ensure role permissions are assigned.
 
-See [Phase 7 API, file manifest, setup, tests, limitations and production provider requirements](docs/PHASE7_TRACKING.md), [workflow output](docs/phase7-workflow-results.txt), [guard output](docs/phase7-guards-results.txt), [inventory output](docs/phase7-inventory-results.txt) and [map/proxy output](docs/phase7-map-results.txt). Provider credentials belong only in backend environment secrets. In production simulation defaults off unless explicitly enabled. Set TRACKING_SIMULATION_ENABLED=false to disable it.
+## Validation
 
-Earlier phase sections are historical delivery milestones. Tracking is now implemented; disk logistics remains a future phase.
+- `npm test` runs focused unit tests.
+- `npm run test:integration` runs PostgreSQL-backed endpoint/permission flows while the app is running and `DATABASE_URL` is set.
+- `npm test` includes exact approval-band boundary, unconfirmed-band, and missing/overlapping configuration tests.
+- `npm test` includes the payment-scheduling engine: Wednesday rolling, the seven-day minimum, month-end and year-end crossings, every submission weekday, at-risk detection, and the required 04-Nov-2026 → 11-Nov-2026 case.
+- `npm run test:integration` includes payment-calendar flows: approval auto-scheduling, at-risk flagging, role-scoped calendar access, pending-vs-overdue handling, seven-day minimum enforcement on manual reschedule, and USD financial summaries.
+- `npm test` includes management-report calculations: KPI aggregation, aging buckets, currency/project/vendor totals, overdue-vs-upcoming, and the April–March financial year.
+- `npm run test:integration` includes management-dashboard flows: `reports:access` enforcement, KPI accuracy against real records, approval aging/overdue/upcoming reports, CSV/XLSX/PDF exports, and date-range filtering. Integration tests run with `--test-concurrency=1` because they share one database and application instance.
+- `npm run test:integration` includes audit-log coverage (admin-only read, append-only, employee lifecycle and payment events) and the `/api/health` probe plus baseline security headers.
+- Payment proof signature/type validation is covered by unit tests. PostgreSQL integration tests exercise authenticated request, AP, and approval flows; payment confirmation requires a migrated test database and running application.
+- `npm run lint` runs ESLint.
+- `npx tsc --noEmit` checks TypeScript.
+- `npm run build` validates the production build.
 
-## Phase 8 — Inspection & Digital Handover
+Database-backed authentication and payment API flows require a PostgreSQL instance, applied migrations, and seeded roles/permissions. Payment integration tests require the app server to be running with the same `DATABASE_URL` and `PAYTRIVA_UPLOAD_DIR`. Email delivery requires the SMTP settings above. The $40,000–$49,999.99 approval band and all other matrix assignments require business/admin configuration before eligible requests can be forwarded. PAYTRIVA records external payment confirmations only; initiating payments, bank integration, and email reminders are not implemented.
 
-Available at `/inspections`: an inspection dashboard; initial CTS receipt, pre-dispatch, receiving and return inspections with checklists and categorized photographs; a dispatch-vs-receiving photo comparison baseline; damage/discrepancy management with an auditable resolution workflow; digital handover with acknowledgements; and printable Proof of Delivery. Submitted inspections are immutable (corrections are new versions; original photographs are retained). A confirmed MAJOR/CRITICAL discrepancy marks a vehicle unavailable **only** through the centralized Inventory service. GPS proximity and image differences never confirm delivery, custody or damage — authorized workflow actions do. Existing Inventory, Ticketing, Dispatch and GPS behavior is unchanged.
+## Security and operations
 
-For an existing database, in `backend` run `npm install`, `npm run prisma:generate`, `npm run prisma:deploy`, `npm run inspections:enable`, then `npm run dev`. In `frontend` run `npm install` then `npm run dev` in a separate terminal. Migration `20261103180000_phase8_inspections_handover` is additive.
+The application emits baseline security headers on every response — Content-Security-Policy, `Strict-Transport-Security`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, and `Permissions-Policy` (configured in `next.config.ts`). Sessions use `HttpOnly`, `Secure` (production), `SameSite=Lax` cookies with hashed opaque tokens; passwords are bcrypt-hashed; all queries use Prisma's parameterized API and React escapes output. `GET /api/health` is an unauthenticated liveness/readiness probe that checks database connectivity and returns no business data.
 
-A pre-dispatch inspection that has been started must be submitted before the dispatch can be confirmed (a rejected inspection blocks confirmation). Set `INSPECTION_PREDISPATCH_REQUIRED=true` to additionally require a completed pre-dispatch inspection to exist for every vehicle; it defaults off so earlier flows are unaffected. The documented commercial baseline is 802 vehicles; no larger fleet is assumed. AI-assisted damage detection is an optional, clearly-labelled suggestion interface only (`aiSuggested`/`aiConfirmed`) — no model is bundled and every suggestion requires human confirmation.
+Operational references live in `docs/`:
 
-Validation: **205 combined Phase 6/8 workflow assertions passed**, plus the full regressions — **206 Phase 6/7 tracking, 34 dispatch guard and 247 inventory assertions** — all green. Frontend and backend production builds pass. Reproduce with the same `GPS_PHASE7_TEST_SECRET` set on the local API and test process, then `cd backend; npm run test:inspections` (extends the Phase 6 fixture; retains synthetic `P6-` records). See [Phase 8 API, models, screens, file manifest, tests, permissions and known issues](docs/PHASE8_INSPECTIONS.md) and [test output](docs/phase8-test-results.txt).
-
-POD is delivered as a server-rendered, self-contained printable HTML document (browser "Save as PDF"), avoiding a heavy server PDF dependency. Real browser visual/keyboard/mobile QA remains outstanding.
-
-## Phase 9 — Dashboard & Reporting
-
-A role-aware operational dashboard at `/dashboard` and a reporting module at `/reports` that read the existing modules as the single source of truth via database aggregation — no duplicated business data. The dashboard shows summary cards (fleet by status, active tickets, pending approvals, delayed trips, completed deliveries), key charts and a live operational-monitoring grid that links into each record. Reports cover fleet, inventory, tickets & approvals, dispatch & delivery, GPS tracking, inspection & damage and vendor/transporter performance, plus a Report Builder, Saved Reports and Export History. CSV, Excel and print-ready PDF exports reuse the same scoped query, so exported totals always match the screen.
-
-Every dashboard/report query is scoped by role and organization: vendors and CTS users see only their own data; operations managers are depot-scoped; admins see everything. Metric rules are documented (utilization excludes available/reserved; on-time % excludes cancelled and separates failed; GPS distance only from recorded VALID/LOW fixes; approval time/SLA only from real timestamps; vendor metrics are measurable-only with no arbitrary score). The scheduled-report service is a configuration/status interface only — no email is sent and no credentials are invented.
-
-For an existing database, in `backend` run `npm install`, `npm run prisma:generate`, `npm run prisma:deploy`, then `npm run dev`. No enable script is needed (reuses `reports:read`, held by all roles). Migration `20261104090000_phase9_reporting` is additive (saved reports, export history, scheduled-report interface).
-
-Validation: **31 reporting assertions passed** (dashboards, all nine datasets, metric rules, CSV/Excel/PDF exports with totals matching the screen, role/organization isolation, date boundaries, empty datasets, saved reports, scheduled interface, export history), with regressions green — **Phase 7 tracking 206, Phase 8 inspections 205, dispatch guards 34, inventory 273**. Frontend and backend production builds pass. Reproduce with the API running against a seeded dev DB: `cd backend; npm run test:reports`. See [Phase 9 APIs, metric definitions, screens, file manifest, tests and limitations](docs/PHASE9_REPORTING.md) and [test output](docs/phase9-test-results.txt).
-
-## Phase 10 — Disk & Media Logistics
-
-Physical storage media (HDD, SSD, TAPE, OPTICAL, FLASH, …) are now tracked end
-to end at `/disk-logistics`, independently of the vehicle inventory. Each disk
-has its own status lifecycle, append-only movement ledger and chain of custody.
-Media moves between CTS, depots, vendors and transporters via **shipments**
-(plan → dispatch → track → receive), damaged/missing arrivals raise
-**discrepancies**, and periodic **reconciliations** are independently reviewed
-(`disk:review`) before any stock adjustment is applied. A tracking event never
-confirms delivery; only an explicit receipt changes custody. Confirming a
-MAJOR/CRITICAL discrepancy marks a disk DAMAGED or LOST.
-
-For an existing database, in `backend` run `npm install`,
-`npm run prisma:generate`, `npm run prisma:deploy`, `npm run disk:enable`, then
-`npm run dev`. In `frontend` run `npm install` then `npm run dev`. Migration
-`20261104120000_phase10_disk_logistics` is additive; `disk:enable` only grants
-`disk:read` / `disk:manage` / `disk:review` to the appropriate roles and creates
-no data.
-
-Validation: **63 disk assertions passed** (registration/bulk, status
-transitions, shipment dispatch/track/receive incl. EXCEPTION and clean delivery,
-custody chain + in-shipment guard, discrepancy state machine with CONFIRMED
-MAJOR → DAMAGED, reconciliation draft→submit→review with MISSING → LOST, vendor
-RBAC/scope isolation, and idempotency), with regressions green — **Phase 8
-inspections 205, Phase 9 reporting 31**. Backend and frontend production builds
-pass. See [Phase 10 APIs, lifecycle, screens, file manifest, tests and
-limitations](docs/PHASE10_DISK_LOGISTICS.md) and
-[test output](docs/phase10-test-results.txt).
-
-## Phase 11 — Vendor Management
-
-The **Vendor Management** workspace at `/vendors` is now fully functional (it was
-previously a "Soon" placeholder). A vendor is an `Organization` of type
-`VEHICLE_VENDOR` or `TRANSPORT_PARTNER` — this module reuses that identity (no
-duplicate vendor entity) and adds vendor registration, a richer profile, multiple
-contacts and locations, assigned-user management, status management, and
-**vendor-wise vehicle & disk inventory**. Every read is organization-scoped and
-every write requires `vendors:manage`, so a vendor user sees only their own
-record and cannot modify it.
-
-For an existing database, in `backend` run `npm install`,
-`npm run prisma:generate`, `npm run prisma:deploy`, `npm run vendors:enable`, then
-`npm run dev`. In `frontend` run `npm install` then `npm run dev`. Migration
-`20261104150000_phase11_vendor_management` is additive (vendor profile, contacts,
-locations); `vendors:enable` grants `vendors:read`/`vendors:manage` to the
-appropriate roles (vendor users get read access to their own org) and creates no
-data.
-
-Each vendor's detail aggregates existing records by organization id — assigned
-and in-custody vehicles, disks in custody, allocations, dispatches, inspections
-and open tickets — so vendor information is integrated with fleet allocation,
-dispatch, inspections and disk logistics without duplicating any data. A vendor
-that currently holds vehicles or disks in custody cannot be deactivated.
-
-Validation: **33 vendor assertions passed** (register/duplicate, profile update,
-contact & location CRUD with single-primary rule, user assign/unassign with
-foreign-org rejection, status + custody-based deactivation guard, vendor-wise
-disk/vehicle inventory, and vendor/operations RBAC + scope isolation), with
-regressions green — **Phase 8 inspections 205, Phase 9 reporting 31, Phase 10
-disk 63**. Backend and frontend production builds pass. See
-[Phase 11 APIs, model, screens, file manifest, tests and limitations](docs/PHASE11_VENDOR_MANAGEMENT.md)
-and [test output](docs/phase11-test-results.txt).
-
-## Phase 12 — Settings
-
-The **Settings** workspace at `/settings` is now functional (it was the last
-"Soon" placeholder in the sidebar). It provides a persisted, admin-managed
-**system-settings registry** (typed, validated, audited, resettable) and
-per-user **preferences** (theme, density, default landing page, notification
-toggles). System settings require `settings:manage` (admins); preferences are
-available to any authenticated user for their own account.
-
-For an existing database, in `backend` run `npm install`,
-`npm run prisma:generate`, `npm run prisma:deploy`, `npm run settings:enable`,
-then `npm run dev`. In `frontend` run `npm install` then `npm run dev`. Migration
-`20261104170000_phase12_settings` is additive (`system_settings`,
-`user_preferences`); `settings:enable` grants `settings:manage` to administrators
-and seeds the default settings catalogue (idempotent, never overwriting saved
-values).
-
-Validation: **17 settings assertions passed** (catalogue listing, typed update
-validation for NUMBER/BOOLEAN, read-only + unknown-key guards, reset-to-default,
-per-user preference create/update/validation, and the `settings:manage` RBAC
-boundary), with regressions green — **Phase 8 inspections 205, Phase 9 reporting
-31, Phase 10 disk 63, Phase 11 vendors 33**. Backend and frontend production
-builds pass. See [Phase 12 APIs, catalogue, screens, file manifest, tests and
-limitations](docs/PHASE12_SETTINGS.md) and
-[test output](docs/phase12-test-results.txt).
-
-**Phases 1–12 are complete, and every sidebar module is now functional. Do not
-start any further phase without approval.**
+- `docs/DEPLOYMENT.md` — production environment, migrations, running the app and the notification worker, HTTPS/reverse proxy, and health checks.
+- `docs/BACKUP_RECOVERY.md` — database and private document-store backups, retention, and the tested restore procedure.
+- `docs/PRODUCTION_READINESS.md` — the audit findings, security review, data-integrity validation, test results, go-live checklist, and known limitations.
